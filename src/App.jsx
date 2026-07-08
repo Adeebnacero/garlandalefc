@@ -792,6 +792,10 @@ export default function App() {
   const [editingTier, setEditingTier] = useState(null); // tier object or "new" or null
   const [managingTiers, setManagingTiers] = useState(false);
 
+  const [backupsList, setBackupsList] = useState([]);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState("");
+
   const loadTiers = useCallback(async () => {
     try {
       const { data: rows, error } = await supabase.from("tiers").select("*").order("monthly_fee", { ascending: false });
@@ -799,6 +803,21 @@ export default function App() {
       setTiers((rows || []).map(fromDbTier));
     } catch (e) {
       setLoadError((prev) => prev || e.message || "Could not load subscription tiers.");
+    }
+  }, []);
+
+  const loadBackups = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase
+        .from("backups")
+        .select("id, created_at, kind")
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      setBackupsList(rows || []);
+    } catch (e) {
+      // Non-fatal - the rest of the app still works without backups visible.
+      setBackupMessage("Could not load backup history: " + (e.message || "unknown error"));
     }
   }, []);
 
@@ -893,7 +912,8 @@ export default function App() {
     loadMatches();
     loadKit();
     loadTiers();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers]);
+    loadBackups();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -1191,6 +1211,109 @@ export default function App() {
     }
   }
 
+  /* ----- Backups ----- */
+
+  async function reloadEverything() {
+    await Promise.all([loadPlayers(), loadMatches(), loadKit(), loadTiers()]);
+  }
+
+  async function runManualBackup() {
+    setBackupBusy(true);
+    setBackupMessage("");
+    try {
+      const { error } = await supabase.rpc("create_backup_snapshot", { p_kind: "manual" });
+      if (error) throw error;
+      await loadBackups();
+      setBackupMessage("Backup created successfully.");
+    } catch (e) {
+      setBackupMessage("Backup failed: " + (e.message || "unknown error"));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function downloadSnapshot(backupId) {
+    try {
+      const { data, error } = await supabase.from("backups").select("*").eq("id", backupId).single();
+      if (error) throw error;
+      const blob = new Blob([JSON.stringify(data.snapshot, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `garlandale-backup-${(data.created_at || "").slice(0, 19).replace(/[:T]/g, "-")}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setBackupMessage("Could not download backup: " + (e.message || "unknown error"));
+    }
+  }
+
+  async function applySnapshot(snapshot) {
+    // Children first, then parents, to respect foreign keys on delete;
+    // reverse order on insert (parents first, then children).
+    const del = (table) => supabase.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000");
+
+    await del("issued_items");
+    await del("match_squad");
+    await del("payments");
+    await del("matches");
+    await del("inventory_items");
+    await del("players");
+    await del("tiers");
+
+    if (snapshot.tiers?.length) await supabase.from("tiers").insert(snapshot.tiers);
+    if (snapshot.players?.length) await supabase.from("players").insert(snapshot.players);
+    if (snapshot.inventory_items?.length) await supabase.from("inventory_items").insert(snapshot.inventory_items);
+    if (snapshot.matches?.length) await supabase.from("matches").insert(snapshot.matches);
+    if (snapshot.payments?.length) await supabase.from("payments").insert(snapshot.payments);
+    if (snapshot.match_squad?.length) await supabase.from("match_squad").insert(snapshot.match_squad);
+    if (snapshot.issued_items?.length) await supabase.from("issued_items").insert(snapshot.issued_items);
+  }
+
+  async function restoreFromSnapshot(backupId) {
+    const confirmed = window.confirm(
+      "This will replace ALL current data with this backup. This cannot be undone. Are you sure you want to continue?"
+    );
+    if (!confirmed) return;
+    setBackupBusy(true);
+    setBackupMessage("");
+    try {
+      const { data, error } = await supabase.from("backups").select("*").eq("id", backupId).single();
+      if (error) throw error;
+      await applySnapshot(data.snapshot);
+      await reloadEverything();
+      await loadBackups();
+      setBackupMessage("Restore complete.");
+    } catch (e) {
+      setBackupMessage("Restore failed: " + (e.message || "unknown error"));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function restoreFromUploadedFile(file) {
+    const confirmed = window.confirm(
+      "This will replace ALL current data with the contents of this file. This cannot be undone. Are you sure you want to continue?"
+    );
+    if (!confirmed) return;
+    setBackupBusy(true);
+    setBackupMessage("");
+    try {
+      const text = await file.text();
+      const snapshot = JSON.parse(text);
+      await applySnapshot(snapshot);
+      await reloadEverything();
+      await loadBackups();
+      setBackupMessage("Restore from file complete.");
+    } catch (e) {
+      setBackupMessage("Restore failed: " + (e.message || "invalid backup file"));
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="gfc-app" style={{ alignItems: "center", justifyContent: "center" }}>
@@ -1236,6 +1359,7 @@ export default function App() {
             { id: "subscriptions", label: "Subscriptions", icon: "$" },
             { id: "matchday", label: "Matchday", icon: "⚽" },
             { id: "kit", label: "Kit", icon: "▦" },
+            { id: "backups", label: "Backups", icon: "⟳" },
             { id: "messages", label: "Messages", icon: "✉" },
           ].map((n) => (
             <button
@@ -1308,6 +1432,19 @@ export default function App() {
             onEditItem={(i) => setEditingItem(i)}
             onIssue={issueItem}
             onReturn={returnItem}
+          />
+        )}
+
+        {tab === "backups" && (
+          <BackupsView
+            backups={backupsList}
+            onRefresh={loadBackups}
+            onBackupNow={runManualBackup}
+            onRestore={restoreFromSnapshot}
+            onDownload={downloadSnapshot}
+            onRestoreFromFile={restoreFromUploadedFile}
+            busy={backupBusy}
+            lastMessage={backupMessage}
           />
         )}
 
@@ -2790,6 +2927,82 @@ function TierModal({ tier, onClose, onSave, onDelete }) {
             <button type="submit" className="gfc-btn gfc-btn-primary">Save tier</button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- BACKUPS ---------- */
+
+function BackupsView({ backups, onRefresh, onBackupNow, onRestore, onDownload, onRestoreFromFile, busy, lastMessage }) {
+  const fileInputRef = React.useRef(null);
+
+  function handleFileChosen(e) {
+    const file = e.target.files?.[0];
+    if (file) onRestoreFromFile(file);
+    e.target.value = "";
+  }
+
+  return (
+    <div>
+      <div className="gfc-topbar">
+        <div>
+          <div className="gfc-page-title gfc-display">Backups</div>
+          <div className="gfc-page-sub">Automatic nightly snapshot at 11pm · last 30 days kept</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="gfc-btn gfc-btn-outline" onClick={onRefresh} disabled={busy}>Refresh list</button>
+          <button className="gfc-btn gfc-btn-primary" onClick={onBackupNow} disabled={busy}>
+            {busy ? "Working…" : "Back up now"}
+          </button>
+        </div>
+      </div>
+
+      {lastMessage && (
+        <div style={{ background: T.amberSoft, border: `1px solid ${T.gold}`, borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#7a5410", marginBottom: 16 }}>
+          {lastMessage}
+        </div>
+      )}
+
+      <div style={{ background: T.paperDim, border: `1px solid ${T.line}`, borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: T.inkSoft, marginBottom: 18 }}>
+        Nightly snapshots protect against mistakes (accidental deletes, bad edits) — restoring rolls the whole club's data back to that point in time. For protection against losing the Supabase project itself, occasionally use <strong>Download</strong> below and save the file somewhere off-project (Google Drive, email to yourself, etc).
+      </div>
+
+      <div className="gfc-panel" style={{ marginBottom: 18 }}>
+        <div className="gfc-panel-head"><div className="gfc-panel-title">Snapshots ({backups.length})</div></div>
+        {backups.length === 0 ? (
+          <div className="gfc-empty">
+            <div className="gfc-empty-title gfc-display">No snapshots yet</div>
+            Click "Back up now" to create your first one, or wait for tonight's automatic run.
+          </div>
+        ) : (
+          <table className="gfc-table">
+            <thead><tr><th>Date &amp; time</th><th>Type</th><th></th></tr></thead>
+            <tbody>
+              {backups.map((b) => (
+                <tr key={b.id}>
+                  <td style={{ fontWeight: 600 }}>{new Date(b.created_at).toLocaleString("en-ZA")}</td>
+                  <td><span className={`gfc-badge ${b.kind === "manual" ? "gfc-badge-neutral" : "gfc-badge-green"}`}><span className="gfc-dot" />{b.kind === "manual" ? "Manual" : "Automatic"}</span></td>
+                  <td style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={() => onDownload(b.id)} disabled={busy}>Download</button>
+                    <button className="gfc-btn gfc-btn-danger gfc-btn-sm" onClick={() => onRestore(b.id)} disabled={busy}>Restore</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="gfc-panel" style={{ padding: 16 }}>
+        <div className="gfc-panel-title" style={{ marginBottom: 10 }}>Restore from a downloaded file</div>
+        <div style={{ fontSize: 12.5, color: T.inkSoft, marginBottom: 10 }}>
+          Upload a previously downloaded backup file to restore the club's data from it.
+        </div>
+        <input ref={fileInputRef} type="file" accept="application/json" onChange={handleFileChosen} style={{ display: "none" }} />
+        <button className="gfc-btn gfc-btn-outline" onClick={() => fileInputRef.current?.click()} disabled={busy}>
+          Choose backup file…
+        </button>
       </div>
     </div>
   );
