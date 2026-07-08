@@ -481,6 +481,24 @@ function computeAgeGroup(dob) {
   return "U" + age;
 }
 
+function computeExactAge(dob) {
+  if (!dob) return null;
+  const birth = new Date(dob);
+  if (isNaN(birth)) return null;
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const hasHadBirthdayThisYear =
+    today.getMonth() > birth.getMonth() ||
+    (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
+  if (!hasHadBirthdayThisYear) age -= 1;
+  return age;
+}
+
+function isOver40(dob) {
+  const age = computeExactAge(dob);
+  return age !== null && age >= 40;
+}
+
 const SEASON_START_MONTH = 0; // January (0-indexed)
 const SEASON_END_MONTH = 9;   // October (0-indexed) - last billable month of the season
 
@@ -930,7 +948,8 @@ export default function App() {
       const fin = playerFinance(p, tiers);
       const status = complianceStatus(p, tiers);
       const ageGroup = p.ageGroupOverride || computeAgeGroup(p.dob);
-      return { ...p, ...fin, status, ageGroup };
+      const over40 = isOver40(p.dob);
+      return { ...p, ...fin, status, ageGroup, over40 };
     });
   }, [players, tiers]);
 
@@ -1603,6 +1622,8 @@ function DashboardView({ stats, enriched, onGoSquad }) {
 /* ---------- SQUAD (ROSTER + AGE GROUPS) ---------- */
 
 function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter, setStatusFilter, search, setSearch, onAdd, onEdit, onOpenLedger }) {
+  const [viewMode, setViewMode] = useState("cards"); // 'cards' or 'list'
+
   return (
     <div>
       <div className="gfc-topbar">
@@ -1613,23 +1634,41 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
         <button className="gfc-btn gfc-btn-primary" onClick={onAdd}>+ Add player</button>
       </div>
 
-      <div className="gfc-filters" style={{ marginBottom: 16 }}>
-        <input
-          className="gfc-input"
-          style={{ maxWidth: 220 }}
-          placeholder="Search by name…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select className="gfc-select" style={{ maxWidth: 160 }} value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)}>
-          {ageGroups.map((g) => <option key={g} value={g}>{g === "All" ? "All age groups" : g}</option>)}
-        </select>
-        <select className="gfc-select" style={{ maxWidth: 170 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="All">All compliance</option>
-          <option value="green">Compliant</option>
-          <option value="amber">Payment due</option>
-          <option value="red">Non-compliant</option>
-        </select>
+      <div className="gfc-filters" style={{ marginBottom: 16, justifyContent: "space-between" }}>
+        <div className="gfc-filters">
+          <input
+            className="gfc-input"
+            style={{ maxWidth: 220 }}
+            placeholder="Search by name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select className="gfc-select" style={{ maxWidth: 160 }} value={ageFilter} onChange={(e) => setAgeFilter(e.target.value)}>
+            {ageGroups.map((g) => <option key={g} value={g}>{g === "All" ? "All age groups" : g}</option>)}
+          </select>
+          <select className="gfc-select" style={{ maxWidth: 170 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="All">All compliance</option>
+            <option value="green">Compliant</option>
+            <option value="amber">Payment due</option>
+            <option value="red">Non-compliant</option>
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 4, background: T.paperDim, borderRadius: 8, padding: 3 }}>
+          <button
+            className="gfc-btn gfc-btn-sm"
+            style={{ background: viewMode === "cards" ? "#fff" : "transparent", color: T.ink, boxShadow: viewMode === "cards" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+            onClick={() => setViewMode("cards")}
+          >
+            ▤ Cards
+          </button>
+          <button
+            className="gfc-btn gfc-btn-sm"
+            style={{ background: viewMode === "list" ? "#fff" : "transparent", color: T.ink, boxShadow: viewMode === "list" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+            onClick={() => setViewMode("list")}
+          >
+            ☰ List
+          </button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -1639,7 +1678,7 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
             Try adjusting the filters, or add a new player to the squad.
           </div>
         </div>
-      ) : (
+      ) : viewMode === "cards" ? (
         <div className="gfc-squad-grid">
           {filtered.map((p) => (
             <div key={p.id} className="gfc-card" onClick={() => onEdit(p)}>
@@ -1651,7 +1690,10 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
                 {p.regNo ? `Reg No: ${p.regNo}` : "Pending federation number"}
               </div>
               <div className="gfc-card-foot">
-                <span className="gfc-agepill">{p.ageGroup}</span>
+                <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span className="gfc-agepill">{p.ageGroup}</span>
+                  {p.over40 && <span className="gfc-agepill" style={{ background: T.goldDeep }}>Over 40</span>}
+                </span>
                 <span className="gfc-card-balance" style={{ color: p.balance > 0 ? T.danger : T.green }}>
                   {p.balance > 0 ? fmtMoney(p.balance) + " due" : "Paid up"}
                 </span>
@@ -1668,6 +1710,44 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
             </div>
           ))}
         </div>
+      ) : (
+        <div className="gfc-panel">
+          <table className="gfc-table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Age group</th>
+                <th>Reg no</th>
+                <th>Phone</th>
+                <th>Tier</th>
+                <th>Balance</th>
+                <th>Compliance</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((p) => (
+                <tr key={p.id} className="clickable" onClick={() => onEdit(p)}>
+                  <td style={{ fontWeight: 600 }}>{p.name}</td>
+                  <td>
+                    <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                      <span className="gfc-agepill">{p.ageGroup}</span>
+                      {p.over40 && <span className="gfc-agepill" style={{ background: T.goldDeep }}>O40</span>}
+                    </span>
+                  </td>
+                  <td style={{ color: p.regNo ? T.ink : T.amber, fontWeight: p.regNo ? 400 : 700 }}>{p.regNo || "Pending"}</td>
+                  <td>{p.phone || "—"}</td>
+                  <td>{p.tierName || <span style={{ color: T.amber, fontWeight: 700 }}>No tier</span>}</td>
+                  <td className="gfc-mono" style={{ fontWeight: 700, color: p.balance > 0 ? T.danger : T.green }}>{fmtMoney(p.balance)}</td>
+                  <td><Badge status={p.status} /></td>
+                  <td>
+                    <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); onOpenLedger(p); }}>Ledger</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -1678,6 +1758,7 @@ function SubscriptionsView({ enriched, tiers, onOpenLedger, onManageTiers }) {
   const sorted = [...enriched].sort((a, b) => b.balance - a.balance);
   const totalDue = enriched.reduce((s, p) => s + p.due, 0);
   const totalPaid = enriched.reduce((s, p) => s + p.paid, 0);
+  const totalOutstanding = enriched.reduce((s, p) => s + Math.max(0, p.balance), 0);
 
   return (
     <div>
@@ -1703,7 +1784,7 @@ function SubscriptionsView({ enriched, tiers, onOpenLedger, onManageTiers }) {
         <div className="gfc-stat">
           <div className="gfc-stat-accent" style={{ background: T.danger }} />
           <div className="gfc-stat-label">Outstanding</div>
-          <div className="gfc-stat-value gfc-mono">{fmtMoney(Math.max(0, totalDue - totalPaid))}</div>
+          <div className="gfc-stat-value gfc-mono">{fmtMoney(totalOutstanding)}</div>
         </div>
       </div>
 
