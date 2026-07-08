@@ -44,6 +44,19 @@ begin
   end if;
 end $$;
 
+-- ---------- subscription tiers ----------
+create table if not exists tiers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  monthly_fee numeric not null default 0,
+  description text default '',
+  created_at timestamptz default now()
+);
+
+alter table players add column if not exists tier_id uuid references tiers(id);
+-- Note: players.monthly_fee is kept for backward compatibility but is no
+-- longer used by the app — fees now come from the assigned tier via tier_id.
+
 -- ---------- matches (fixtures) ----------
 create table if not exists matches (
   id uuid primary key default gen_random_uuid(),
@@ -118,6 +131,69 @@ create table if not exists issued_items (
 create index if not exists issued_items_player_id_idx on issued_items(player_id);
 create index if not exists match_squad_match_id_idx on match_squad(match_id);
 
+-- ---------- backups ----------
+-- Automatic nightly snapshots (kept for 30 days) plus on-demand backups
+-- triggered manually from the app. Each row is a full copy of every table
+-- at that point in time, stored as JSON.
+create extension if not exists "pg_cron";
+
+create table if not exists backups (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  kind text default 'scheduled', -- 'scheduled' or 'manual'
+  snapshot jsonb not null
+);
+
+create index if not exists backups_created_at_idx on backups(created_at desc);
+
+create or replace function create_backup_snapshot(p_kind text default 'scheduled')
+returns uuid
+language plpgsql
+security definer
+as $$
+declare
+  new_id uuid;
+begin
+  insert into backups (kind, snapshot)
+  values (
+    p_kind,
+    jsonb_build_object(
+      'players', (select coalesce(jsonb_agg(to_jsonb(p)), '[]'::jsonb) from players p),
+      'payments', (select coalesce(jsonb_agg(to_jsonb(p)), '[]'::jsonb) from payments p),
+      'tiers', (select coalesce(jsonb_agg(to_jsonb(t)), '[]'::jsonb) from tiers t),
+      'matches', (select coalesce(jsonb_agg(to_jsonb(m)), '[]'::jsonb) from matches m),
+      'match_squad', (select coalesce(jsonb_agg(to_jsonb(ms)), '[]'::jsonb) from match_squad ms),
+      'inventory_items', (select coalesce(jsonb_agg(to_jsonb(i)), '[]'::jsonb) from inventory_items i),
+      'issued_items', (select coalesce(jsonb_agg(to_jsonb(ii)), '[]'::jsonb) from issued_items ii)
+    )
+  )
+  returning id into new_id;
+
+  -- prune anything older than 30 days so free-tier storage stays healthy
+  delete from backups where created_at < now() - interval '30 days';
+
+  return new_id;
+end;
+$$;
+
+-- Schedule the nightly snapshot for 21:00 UTC = 23:00 (11pm) Cape Town time
+-- (SAST is UTC+2 year-round, no daylight saving). Re-running this schema is
+-- safe - it clears any existing job with this name before re-scheduling.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'garlandale-nightly-backup') then
+    perform cron.unschedule('garlandale-nightly-backup');
+  end if;
+end $$;
+
+select cron.schedule(
+  'garlandale-nightly-backup',
+  '0 21 * * *',
+  $$select create_backup_snapshot('scheduled');$$
+);
+
+grant execute on function create_backup_snapshot(text) to anon, authenticated;
+
 -- ---------- Row Level Security ----------
 -- No login screen — used directly by the Chairman with the public "anon" key.
 -- These policies allow full access for that reason (see README for the
@@ -125,16 +201,21 @@ create index if not exists match_squad_match_id_idx on match_squad(match_id);
 
 alter table players enable row level security;
 alter table payments enable row level security;
+alter table tiers enable row level security;
 alter table matches enable row level security;
 alter table match_squad enable row level security;
 alter table inventory_items enable row level security;
 alter table issued_items enable row level security;
+alter table backups enable row level security;
 
 drop policy if exists "Allow all on players" on players;
 create policy "Allow all on players" on players for all using (true) with check (true);
 
 drop policy if exists "Allow all on payments" on payments;
 create policy "Allow all on payments" on payments for all using (true) with check (true);
+
+drop policy if exists "Allow all on tiers" on tiers;
+create policy "Allow all on tiers" on tiers for all using (true) with check (true);
 
 drop policy if exists "Allow all on matches" on matches;
 create policy "Allow all on matches" on matches for all using (true) with check (true);
@@ -148,12 +229,20 @@ create policy "Allow all on inventory_items" on inventory_items for all using (t
 drop policy if exists "Allow all on issued_items" on issued_items;
 create policy "Allow all on issued_items" on issued_items for all using (true) with check (true);
 
+drop policy if exists "Allow all on backups" on backups;
+create policy "Allow all on backups" on backups for all using (true) with check (true);
+
 -- ---------- optional: seed data (run once, on a fresh database) ----------
-insert into players (name, dob, phone, email, guardian_name, guardian_phone, join_date, monthly_fee, documents_complete, notes, reg_no, squad_number)
+insert into tiers (name, monthly_fee, description) values
+  ('Standard', 350, 'Default monthly subscription'),
+  ('Sibling discount', 300, 'Applied when a household has multiple registered players'),
+  ('Hardship', 150, 'Reduced fee, chairman discretion');
+
+insert into players (name, dob, phone, email, guardian_name, guardian_phone, join_date, monthly_fee, documents_complete, notes, reg_no, squad_number, tier_id)
 values
-  ('Liam Adams', '2014-03-12', '+27 82 111 2222', 'liam.parent@example.com', 'Sarah Adams', '+27 82 111 2222', '2023-02-01', 350, true, '', '347431', 1),
-  ('Thabo Nkosi', '2013-07-30', '+27 83 222 3333', 'thabo.parent@example.com', 'Nomvula Nkosi', '+27 83 222 3333', '2022-09-15', 350, true, '', '189383', 5),
-  ('Ethan van der Merwe', '2015-01-05', '+27 84 333 4444', 'ethan.parent@example.com', 'Riaan van der Merwe', '+27 84 333 4444', '2024-01-10', 300, false, 'Medical form outstanding', null, 14);
+  ('Liam Adams', '2014-03-12', '+27 82 111 2222', 'liam.parent@example.com', 'Sarah Adams', '+27 82 111 2222', '2023-02-01', 350, true, '', '347431', 1, (select id from tiers where name = 'Standard')),
+  ('Thabo Nkosi', '2013-07-30', '+27 83 222 3333', 'thabo.parent@example.com', 'Nomvula Nkosi', '+27 83 222 3333', '2022-09-15', 350, true, '', '189383', 5, (select id from tiers where name = 'Standard')),
+  ('Ethan van der Merwe', '2015-01-05', '+27 84 333 4444', 'ethan.parent@example.com', 'Riaan van der Merwe', '+27 84 333 4444', '2024-01-10', 300, false, 'Medical form outstanding', null, 14, (select id from tiers where name = 'Sibling discount'));
 
 insert into inventory_items (name, category, size, quantity_on_hand)
 values
@@ -161,3 +250,6 @@ values
   ('Away jersey', 'Jersey', 'Youth M', 15),
   ('Training bib', 'Bib', 'One size', 25),
   ('Tracksuit top', 'Tracksuit', 'Youth L', 10);
+
+-- take an initial snapshot so the Backups tab has something to show right away
+select create_backup_snapshot('manual');
