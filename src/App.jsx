@@ -481,27 +481,64 @@ function computeAgeGroup(dob) {
   return "U" + age;
 }
 
-function monthsElapsedSince(joinDate) {
-  if (!joinDate) return 0;
-  const start = new Date(joinDate);
-  const now = new Date();
-  if (isNaN(start) || start > now) return 0;
-  let months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
-  if (now.getDate() >= start.getDate()) months += 1; // count current partial month as due
-  return Math.max(1, months);
+const SEASON_START_MONTH = 0; // January (0-indexed)
+const SEASON_END_MONTH = 9;   // October (0-indexed) - last billable month of the season
+
+/**
+ * Season runs January (0) through October (9). November/December accrue
+ * nothing. A player's very first season is pro-rated from their join month;
+ * every season after that bills the full Jan-Oct run. Balances are one
+ * continuous running total across every season a player has been a member
+ * (unpaid amounts carry forward rather than resetting each year).
+ */
+function seasonMonthsDueForYear(year, joinDate, today) {
+  const join = new Date(joinDate);
+  if (isNaN(join)) return 0;
+  const joinYear = join.getFullYear();
+  const joinMonth = join.getMonth();
+  if (year < joinYear) return 0;
+
+  const startMonth = year === joinYear ? Math.min(joinMonth, SEASON_END_MONTH + 1) : SEASON_START_MONTH;
+  // If they joined in Nov/Dec, that's effectively joining ahead of next season - no months due this year.
+  if (year === joinYear && joinMonth > SEASON_END_MONTH) return 0;
+
+  let endMonthExclusive;
+  if (year < today.getFullYear()) {
+    endMonthExclusive = SEASON_END_MONTH + 1; // past season, fully elapsed
+  } else if (year === today.getFullYear()) {
+    const currentMonth = today.getMonth();
+    endMonthExclusive = currentMonth > SEASON_END_MONTH ? SEASON_END_MONTH + 1 : currentMonth + 1;
+  } else {
+    endMonthExclusive = 0; // future year, shouldn't happen
+  }
+
+  return Math.max(0, endMonthExclusive - startMonth);
 }
 
-function playerFinance(player) {
-  const due = monthsElapsedSince(player.joinDate) * (Number(player.monthlyFee) || 0);
+function totalSeasonMonthsDue(joinDate, today = new Date()) {
+  const join = new Date(joinDate);
+  if (isNaN(join)) return 0;
+  let total = 0;
+  for (let y = join.getFullYear(); y <= today.getFullYear(); y++) {
+    total += seasonMonthsDueForYear(y, joinDate, today);
+  }
+  return total;
+}
+
+function playerFinance(player, tiers) {
+  const tier = (tiers || []).find((t) => t.id === player.tierId);
+  const fee = tier ? Number(tier.monthlyFee) || 0 : 0;
+  const monthsDue = totalSeasonMonthsDue(player.joinDate);
+  const due = monthsDue * fee;
   const paid = (player.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const balance = due - paid;
-  return { due, paid, balance };
+  return { due, paid, balance, fee, tierName: tier ? tier.name : "" };
 }
 
-function complianceStatus(player) {
-  const { balance } = playerFinance(player);
-  const fee = Number(player.monthlyFee) || 0;
+function complianceStatus(player, tiers) {
+  const { balance, fee } = playerFinance(player, tiers);
   if (!player.documentsComplete) return "red";
+  if (!player.tierId) return "amber";
   if (balance <= 0) return "green";
   if (fee > 0 && balance <= fee) return "amber";
   if (balance > 0) return "red";
@@ -510,6 +547,7 @@ function complianceStatus(player) {
 
 const STATUS_LABEL = { green: "Compliant", amber: "Payment due", red: "Non-compliant" };
 const STATUS_COLOR = { green: T.green, amber: T.amber, red: T.danger };
+
 
 function Badge({ status }) {
   const cls = status === "green" ? "gfc-badge-green" : status === "amber" ? "gfc-badge-amber" : status === "red" ? "gfc-badge-red" : "gfc-badge-neutral";
@@ -593,6 +631,7 @@ function fromDbPlayer(row) {
     notes: row.notes || "",
     regNo: row.reg_no || "",
     squadNumber: row.squad_number === null || row.squad_number === undefined ? "" : row.squad_number,
+    tierId: row.tier_id || "",
     payments: (row.payments || [])
       .map((p) => ({ id: p.id, amount: Number(p.amount), date: p.date, method: p.method }))
       .sort((a, b) => new Date(b.date) - new Date(a.date)),
@@ -609,11 +648,28 @@ function toDbPlayer(form) {
     guardian_name: form.guardianName || "",
     guardian_phone: form.guardianPhone || "",
     join_date: form.joinDate || null,
-    monthly_fee: Number(form.monthlyFee) || 0,
     documents_complete: !!form.documentsComplete,
     notes: form.notes || "",
     reg_no: form.regNo && form.regNo.trim() ? form.regNo.trim() : null,
     squad_number: form.squadNumber === "" || form.squadNumber === null || form.squadNumber === undefined ? null : Number(form.squadNumber),
+    tier_id: form.tierId || null,
+  };
+}
+
+function fromDbTier(row) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    monthlyFee: Number(row.monthly_fee) || 0,
+    description: row.description || "",
+  };
+}
+
+function toDbTier(form) {
+  return {
+    name: form.name || "",
+    monthly_fee: Number(form.monthlyFee) || 0,
+    description: form.description || "",
   };
 }
 
@@ -732,6 +788,20 @@ export default function App() {
   const [issuedItems, setIssuedItems] = useState([]);
   const [editingItem, setEditingItem] = useState(null); // inventory item or "new" or null
 
+  const [tiers, setTiers] = useState([]);
+  const [editingTier, setEditingTier] = useState(null); // tier object or "new" or null
+  const [managingTiers, setManagingTiers] = useState(false);
+
+  const loadTiers = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("tiers").select("*").order("monthly_fee", { ascending: false });
+      if (error) throw error;
+      setTiers((rows || []).map(fromDbTier));
+    } catch (e) {
+      setLoadError((prev) => prev || e.message || "Could not load subscription tiers.");
+    }
+  }, []);
+
   const loadPlayers = useCallback(async () => {
     setLoading(true);
     setLoadError("");
@@ -822,7 +892,8 @@ export default function App() {
     loadPlayers();
     loadMatches();
     loadKit();
-  }, [loadPlayers, loadMatches, loadKit]);
+    loadTiers();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -836,12 +907,12 @@ export default function App() {
 
   const enriched = useMemo(() => {
     return players.map((p) => {
-      const fin = playerFinance(p);
-      const status = complianceStatus(p);
+      const fin = playerFinance(p, tiers);
+      const status = complianceStatus(p, tiers);
       const ageGroup = p.ageGroupOverride || computeAgeGroup(p.dob);
       return { ...p, ...fin, status, ageGroup };
     });
-  }, [players]);
+  }, [players, tiers]);
 
   const filtered = useMemo(() => {
     return enriched.filter((p) => {
@@ -1014,6 +1085,40 @@ export default function App() {
     }
   }
 
+  /* ----- Tier CRUD ----- */
+
+  async function saveTier(form) {
+    setSaveError(false);
+    const payload = toDbTier(form);
+    try {
+      if (form.id) {
+        const { error } = await supabase.from("tiers").update(payload).eq("id", form.id);
+        if (error) throw error;
+        setTiers((prev) => prev.map((t) => (t.id === form.id ? { ...t, ...form, monthlyFee: Number(form.monthlyFee) } : t)));
+      } else {
+        const { data: inserted, error } = await supabase.from("tiers").insert(payload).select().single();
+        if (error) throw error;
+        setTiers((prev) => [...prev, fromDbTier(inserted)]);
+      }
+      setEditingTier(null);
+    } catch (e) {
+      setSaveError(true);
+    }
+  }
+
+  async function deleteTier(id) {
+    setSaveError(false);
+    try {
+      const { error } = await supabase.from("tiers").delete().eq("id", id);
+      if (error) throw error;
+      setTiers((prev) => prev.filter((t) => t.id !== id));
+      setPlayers((prev) => prev.map((p) => (p.tierId === id ? { ...p, tierId: "" } : p)));
+    } catch (e) {
+      setSaveError(true);
+    }
+    setEditingTier(null);
+  }
+
   /* ----- Kit CRUD ----- */
 
   async function saveItem(form) {
@@ -1171,7 +1276,12 @@ export default function App() {
         )}
 
         {tab === "subscriptions" && (
-          <SubscriptionsView enriched={enriched} onOpenLedger={(p) => setLedgerPlayerId(p.id)} />
+          <SubscriptionsView
+            enriched={enriched}
+            tiers={tiers}
+            onOpenLedger={(p) => setLedgerPlayerId(p.id)}
+            onManageTiers={() => setManagingTiers(true)}
+          />
         )}
 
         {tab === "matchday" && (
@@ -1219,9 +1329,11 @@ export default function App() {
       {editingPlayer && (
         <PlayerModal
           player={editingPlayer === "new" ? null : editingPlayer}
+          tiers={tiers}
           onClose={() => setEditingPlayer(null)}
           onSave={savePlayer}
           onDelete={deletePlayer}
+          onManageTiers={() => setManagingTiers(true)}
         />
       )}
 
@@ -1231,6 +1343,24 @@ export default function App() {
           onClose={() => setLedgerPlayerId(null)}
           onAddPayment={(payment) => addPayment(ledgerPlayer.id, payment)}
           onRemovePayment={(paymentId) => removePayment(ledgerPlayer.id, paymentId)}
+        />
+      )}
+
+      {managingTiers && (
+        <TierManagerModal
+          tiers={tiers}
+          onClose={() => setManagingTiers(false)}
+          onAdd={() => setEditingTier("new")}
+          onEdit={(t) => setEditingTier(t)}
+        />
+      )}
+
+      {editingTier && (
+        <TierModal
+          tier={editingTier === "new" ? null : editingTier}
+          onClose={() => setEditingTier(null)}
+          onSave={saveTier}
+          onDelete={deleteTier}
         />
       )}
 
@@ -1407,7 +1537,7 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
 }
 /* ---------- SUBSCRIPTIONS ---------- */
 
-function SubscriptionsView({ enriched, onOpenLedger }) {
+function SubscriptionsView({ enriched, tiers, onOpenLedger, onManageTiers }) {
   const sorted = [...enriched].sort((a, b) => b.balance - a.balance);
   const totalDue = enriched.reduce((s, p) => s + p.due, 0);
   const totalPaid = enriched.reduce((s, p) => s + p.paid, 0);
@@ -1417,8 +1547,9 @@ function SubscriptionsView({ enriched, onOpenLedger }) {
       <div className="gfc-topbar">
         <div>
           <div className="gfc-page-title gfc-display">Subscriptions</div>
-          <div className="gfc-page-sub">Fees, payments, and running balances across the club</div>
+          <div className="gfc-page-sub">Season runs January–October · fees, payments, and running balances</div>
         </div>
+        <button className="gfc-btn gfc-btn-outline" onClick={onManageTiers}>Manage tiers</button>
       </div>
 
       <div className="gfc-stat-row">
@@ -1454,7 +1585,7 @@ function SubscriptionsView({ enriched, onOpenLedger }) {
               <tr>
                 <th>Player</th>
                 <th>Age group</th>
-                <th>Monthly fee</th>
+                <th>Tier</th>
                 <th>Billed to date</th>
                 <th>Paid</th>
                 <th>Balance</th>
@@ -1467,7 +1598,7 @@ function SubscriptionsView({ enriched, onOpenLedger }) {
                 <tr key={p.id} className="clickable" onClick={() => onOpenLedger(p)}>
                   <td style={{ fontWeight: 600 }}>{p.name}</td>
                   <td><span className="gfc-agepill">{p.ageGroup}</span></td>
-                  <td className="gfc-mono">{fmtMoney(p.monthlyFee)}</td>
+                  <td>{p.tierName ? `${p.tierName} (${fmtMoney(p.fee)}/mo)` : <span style={{ color: T.amber, fontWeight: 700 }}>No tier set</span>}</td>
                   <td className="gfc-mono">{fmtMoney(p.due)}</td>
                   <td className="gfc-mono">{fmtMoney(p.paid)}</td>
                   <td className="gfc-mono" style={{ fontWeight: 700, color: p.balance > 0 ? T.danger : T.green }}>
@@ -1630,7 +1761,7 @@ function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds, templa
 }
 /* ---------- PLAYER MODAL (add/edit) ---------- */
 
-function PlayerModal({ player, onClose, onSave, onDelete }) {
+function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers }) {
   const [form, setForm] = useState(() => ({
     id: player?.id || "",
     name: player?.name || "",
@@ -1641,7 +1772,7 @@ function PlayerModal({ player, onClose, onSave, onDelete }) {
     guardianName: player?.guardianName || "",
     guardianPhone: player?.guardianPhone || "",
     joinDate: player?.joinDate || todayISO(),
-    monthlyFee: player?.monthlyFee ?? 300,
+    tierId: player?.tierId || "",
     documentsComplete: player?.documentsComplete ?? false,
     notes: player?.notes || "",
     regNo: player?.regNo || "",
@@ -1711,12 +1842,16 @@ function PlayerModal({ player, onClose, onSave, onDelete }) {
 
           <div className="gfc-row2">
             <div className="gfc-field">
-              <label className="gfc-label">Club join date</label>
+              <label className="gfc-label">Club join date <span style={{ fontWeight: 400, textTransform: "none", color: T.inkSoft }}>(tenure/service record — also sets first season's pro-rated start)</span></label>
               <input type="date" className="gfc-input" value={form.joinDate} onChange={(e) => update("joinDate", e.target.value)} />
             </div>
             <div className="gfc-field">
-              <label className="gfc-label">Monthly fee (R)</label>
-              <input type="number" min="0" step="10" className="gfc-input" value={form.monthlyFee} onChange={(e) => update("monthlyFee", e.target.value)} />
+              <label className="gfc-label">Subscription tier</label>
+              <select className="gfc-select" value={form.tierId} onChange={(e) => update("tierId", e.target.value)}>
+                <option value="">No tier assigned</option>
+                {tiers.map((t) => <option key={t.id} value={t.id}>{t.name} — {fmtMoney(t.monthlyFee)}/mo</option>)}
+              </select>
+              <button type="button" className="gfc-btn gfc-btn-ghost gfc-btn-sm" style={{ paddingLeft: 0, marginTop: 4 }} onClick={onManageTiers}>Manage tiers →</button>
             </div>
           </div>
 
@@ -1772,7 +1907,7 @@ function PlayerModal({ player, onClose, onSave, onDelete }) {
 /* ---------- LEDGER MODAL (payments) ---------- */
 
 function LedgerModal({ player, onClose, onAddPayment, onRemovePayment }) {
-  const [amount, setAmount] = useState(player.monthlyFee || "");
+  const [amount, setAmount] = useState(player.fee || "");
   const [date, setDate] = useState(todayISO());
   const [method, setMethod] = useState("EFT");
 
@@ -1781,7 +1916,7 @@ function LedgerModal({ player, onClose, onAddPayment, onRemovePayment }) {
     const amt = Number(amount);
     if (!amt || amt <= 0) return;
     onAddPayment({ amount: amt, date, method });
-    setAmount(player.monthlyFee || "");
+    setAmount(player.fee || "");
   }
 
   const payments = [...(player.payments || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1792,7 +1927,7 @@ function LedgerModal({ player, onClose, onAddPayment, onRemovePayment }) {
         <div className="gfc-modal-head">
           <div>
             <div className="gfc-modal-title gfc-display">{player.name}</div>
-            <div style={{ fontSize: 12, color: T.inkSoft }}>{player.ageGroup} · {fmtMoney(player.monthlyFee)}/month</div>
+            <div style={{ fontSize: 12, color: T.inkSoft }}>{player.ageGroup} · {player.tierName ? `${player.tierName} · ${fmtMoney(player.fee)}/month` : "No tier assigned"}</div>
           </div>
           <button className="gfc-modal-close" onClick={onClose}>×</button>
         </div>
@@ -2555,6 +2690,104 @@ function ItemModal({ item, onClose, onSave, onDelete }) {
             )}
             <button type="button" className="gfc-btn gfc-btn-ghost" onClick={onClose}>Cancel</button>
             <button type="submit" className="gfc-btn gfc-btn-primary">Save item</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- SUBSCRIPTION TIERS ---------- */
+
+function TierManagerModal({ tiers, onClose, onAdd, onEdit }) {
+  return (
+    <div className="gfc-modal-backdrop" onClick={onClose}>
+      <div className="gfc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="gfc-modal-head">
+          <div className="gfc-modal-title gfc-display">Subscription tiers</div>
+          <button className="gfc-modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={onAdd}>+ Add tier</button>
+        </div>
+
+        {tiers.length === 0 ? (
+          <div className="gfc-empty">
+            <div className="gfc-empty-title gfc-display">No tiers yet</div>
+            Add a tier (e.g. "Standard") to start assigning fees to players.
+          </div>
+        ) : (
+          <div className="gfc-checklist" style={{ maxHeight: 320 }}>
+            {tiers.map((t) => (
+              <div key={t.id} className="gfc-checklist-row">
+                <div>
+                  <div style={{ fontWeight: 700 }}>{t.name}</div>
+                  {t.description && <div style={{ fontSize: 11.5, color: T.inkSoft }}>{t.description}</div>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span className="gfc-mono" style={{ fontWeight: 700 }}>{fmtMoney(t.monthlyFee)}/mo</span>
+                  <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={() => onEdit(t)}>Edit</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="gfc-modal-actions">
+          <button className="gfc-btn gfc-btn-outline" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TierModal({ tier, onClose, onSave, onDelete }) {
+  const [form, setForm] = useState(() => ({
+    id: tier?.id || "",
+    name: tier?.name || "",
+    monthlyFee: tier?.monthlyFee ?? 300,
+    description: tier?.description || "",
+  }));
+
+  function update(field, value) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.name.trim()) return;
+    onSave(form);
+  }
+
+  return (
+    <div className="gfc-modal-backdrop" onClick={onClose}>
+      <div className="gfc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="gfc-modal-head">
+          <div className="gfc-modal-title gfc-display">{tier ? "Edit tier" : "New tier"}</div>
+          <button className="gfc-modal-close" onClick={onClose}>×</button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="gfc-field">
+            <label className="gfc-label">Tier name</label>
+            <input className="gfc-input" placeholder="e.g. Standard, Sibling discount" value={form.name} onChange={(e) => update("name", e.target.value)} required />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Monthly fee (R)</label>
+            <input type="number" min="0" step="10" className="gfc-input" value={form.monthlyFee} onChange={(e) => update("monthlyFee", e.target.value)} />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Description (optional)</label>
+            <textarea className="gfc-textarea" rows={2} value={form.description} onChange={(e) => update("description", e.target.value)} />
+          </div>
+          <div className="gfc-modal-actions">
+            {tier && (
+              <button type="button" className="gfc-btn gfc-btn-danger" style={{ marginRight: "auto" }} onClick={() => onDelete(tier.id)}>
+                Delete tier
+              </button>
+            )}
+            <button type="button" className="gfc-btn gfc-btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="gfc-btn gfc-btn-primary">Save tier</button>
           </div>
         </form>
       </div>
