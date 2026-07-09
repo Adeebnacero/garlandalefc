@@ -1733,7 +1733,7 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
                   <td>
                     <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
                       <span className="gfc-agepill">{p.ageGroup}</span>
-                      {p.over40 && <span className="gfc-agepill" style={{ background: T.goldDeep }}>O40</span>}
+                      {p.over40 && <span className="gfc-agepill" style={{ background: T.goldDeep }}>Vet</span>}
                     </span>
                   </td>
                   <td style={{ color: p.regNo ? T.ink : T.amber, fontWeight: p.regNo ? 400 : 700 }}>{p.regNo || "Pending"}</td>
