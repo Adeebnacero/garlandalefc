@@ -476,7 +476,8 @@ function computeAgeGroup(dob) {
   // English/SA grassroots convention: age-group cutoff is 31 Aug.
   const cutoffYear = today.getMonth() >= 8 ? today.getFullYear() + 1 : today.getFullYear();
   const age = cutoffYear - birth.getFullYear();
-  if (age >= 18) return "Senior";
+  if (age >= 18 && age < 40) return "Senior";
+  if (age >= 40) return "Over 40";
   if (age <= 0) return "Unassigned";
   return "U" + age;
 }
