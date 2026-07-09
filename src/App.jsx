@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./supabaseClient";
+import html2canvas from "html2canvas";
 
 const BADGE_SRC = "data:image/png;base64,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";
 /* ---------- DESIGN TOKENS ----------
@@ -476,7 +477,7 @@ function computeAgeGroup(dob) {
   // English/SA grassroots convention: age-group cutoff is 31 Aug.
   const cutoffYear = today.getMonth() >= 8 ? today.getFullYear() + 1 : today.getFullYear();
   const age = cutoffYear - birth.getFullYear();
-  if (age >= 18) return "Senior";
+  if (age >= 18) return "Seniors";
   if (age <= 0) return "Unassigned";
   return "U" + age;
 }
@@ -503,50 +504,81 @@ const SEASON_START_MONTH = 0; // January (0-indexed)
 const SEASON_END_MONTH = 9;   // October (0-indexed) - last billable month of the season
 
 /**
+ * Builds a timeline of active/inactive segments for a player from their
+ * join date and status-change history. A player is assumed active from
+ * their join date until the first logged status change; after that, each
+ * logged change opens a new segment running until the next one (or to the
+ * far future for the current, still-open segment).
+ */
+function buildActiveSegments(joinDate, statusLog) {
+  const join = new Date(joinDate);
+  if (isNaN(join)) return [];
+  const sorted = [...(statusLog || [])]
+    .map((s) => ({ status: s.status, at: new Date(s.changedAt) }))
+    .filter((s) => !isNaN(s.at))
+    .sort((a, b) => a.at - b.at);
+
+  const segments = [];
+  let cursor = join;
+  let cursorStatus = "active";
+  for (const entry of sorted) {
+    if (entry.at > cursor) {
+      segments.push({ status: cursorStatus, start: cursor, end: entry.at });
+      cursor = entry.at;
+    }
+    cursorStatus = entry.status;
+  }
+  segments.push({ status: cursorStatus, start: cursor, end: new Date(8640000000000000) });
+  return segments;
+}
+
+function monthHasActiveOverlap(segments, monthStart, monthEnd) {
+  return segments.some((seg) => seg.status === "active" && seg.start < monthEnd && seg.end > monthStart);
+}
+
+/**
  * Season runs January (0) through October (9). November/December accrue
  * nothing. A player's very first season is pro-rated from their join month;
  * every season after that bills the full Jan-Oct run. Balances are one
  * continuous running total across every season a player has been a member
- * (unpaid amounts carry forward rather than resetting each year).
+ * (unpaid amounts carry forward rather than resetting each year). Any month
+ * fully covered by an inactive period is skipped entirely - no fee accrues
+ * while paused, no matter how many times a player pauses and returns.
  */
-function seasonMonthsDueForYear(year, joinDate, today) {
+function totalSeasonMonthsDue(joinDate, statusLog, today = new Date()) {
   const join = new Date(joinDate);
   if (isNaN(join)) return 0;
+  const segments = buildActiveSegments(joinDate, statusLog);
   const joinYear = join.getFullYear();
   const joinMonth = join.getMonth();
-  if (year < joinYear) return 0;
+  if (joinMonth > SEASON_END_MONTH && today.getFullYear() === joinYear) return 0;
 
-  const startMonth = year === joinYear ? Math.min(joinMonth, SEASON_END_MONTH + 1) : SEASON_START_MONTH;
-  // If they joined in Nov/Dec, that's effectively joining ahead of next season - no months due this year.
-  if (year === joinYear && joinMonth > SEASON_END_MONTH) return 0;
+  let count = 0;
+  for (let y = joinYear; y <= today.getFullYear(); y++) {
+    const startMonth = y === joinYear ? Math.min(joinMonth, SEASON_END_MONTH + 1) : SEASON_START_MONTH;
+    if (y === joinYear && joinMonth > SEASON_END_MONTH) continue;
 
-  let endMonthExclusive;
-  if (year < today.getFullYear()) {
-    endMonthExclusive = SEASON_END_MONTH + 1; // past season, fully elapsed
-  } else if (year === today.getFullYear()) {
-    const currentMonth = today.getMonth();
-    endMonthExclusive = currentMonth > SEASON_END_MONTH ? SEASON_END_MONTH + 1 : currentMonth + 1;
-  } else {
-    endMonthExclusive = 0; // future year, shouldn't happen
+    let endMonthExclusive;
+    if (y < today.getFullYear()) {
+      endMonthExclusive = SEASON_END_MONTH + 1;
+    } else {
+      const currentMonth = today.getMonth();
+      endMonthExclusive = currentMonth > SEASON_END_MONTH ? SEASON_END_MONTH + 1 : currentMonth + 1;
+    }
+
+    for (let m = startMonth; m < endMonthExclusive; m++) {
+      const monthStart = new Date(y, m, 1);
+      const monthEnd = new Date(y, m + 1, 1);
+      if (monthHasActiveOverlap(segments, monthStart, monthEnd)) count++;
+    }
   }
-
-  return Math.max(0, endMonthExclusive - startMonth);
-}
-
-function totalSeasonMonthsDue(joinDate, today = new Date()) {
-  const join = new Date(joinDate);
-  if (isNaN(join)) return 0;
-  let total = 0;
-  for (let y = join.getFullYear(); y <= today.getFullYear(); y++) {
-    total += seasonMonthsDueForYear(y, joinDate, today);
-  }
-  return total;
+  return count;
 }
 
 function playerFinance(player, tiers) {
   const tier = (tiers || []).find((t) => t.id === player.tierId);
   const fee = tier ? Number(tier.monthlyFee) || 0 : 0;
-  const monthsDue = totalSeasonMonthsDue(player.joinDate);
+  const monthsDue = totalSeasonMonthsDue(player.joinDate, player.statusLog);
   const due = monthsDue * fee;
   const paid = (player.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const balance = due - paid;
@@ -554,6 +586,7 @@ function playerFinance(player, tiers) {
 }
 
 function complianceStatus(player, tiers) {
+  if (!player.active) return "inactive";
   const { balance, fee } = playerFinance(player, tiers);
   if (!player.documentsComplete) return "red";
   if (!player.tierId) return "amber";
@@ -563,8 +596,8 @@ function complianceStatus(player, tiers) {
   return "green";
 }
 
-const STATUS_LABEL = { green: "Compliant", amber: "Payment due", red: "Non-compliant" };
-const STATUS_COLOR = { green: T.green, amber: T.amber, red: T.danger };
+const STATUS_LABEL = { green: "Compliant", amber: "Payment due", red: "Non-compliant", inactive: "Inactive" };
+const STATUS_COLOR = { green: T.green, amber: T.amber, red: T.danger, inactive: T.inkSoft };
 
 
 function Badge({ status }) {
@@ -574,6 +607,15 @@ function Badge({ status }) {
       <span className="gfc-dot" />
       {STATUS_LABEL[status] || "—"}
     </span>
+  );
+}
+
+function InactiveToggle({ includeInactive, setIncludeInactive }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600, color: T.inkSoft, cursor: "pointer", whiteSpace: "nowrap" }}>
+      <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} />
+      Show inactive players
+    </label>
   );
 }
 
@@ -604,22 +646,22 @@ const TEMPLATES = [
   {
     id: "payment_reminder",
     label: "Payment reminder",
-    text: "Hi {first_name}, this is Garlandale FC. Our records show an outstanding subscription balance of {balance} for {age_group}'s. Please settle this at your earliest convenience. Thank you!",
+    text: "Hi {first_name}, this is Garlandale FC. Our records show an outstanding subscription balance of {balance} for {age_group}. Please settle this at your earliest convenience. Thank you!",
   },
   {
     id: "welcome",
     label: "Welcome message",
-    text: "Welcome to Garlandale FC, {first_name}! We're excited to have you in our {age_group}'s. Training details will follow shortly.",
+    text: "Welcome to Garlandale FC, {first_name}! We're excited to have you in {age_group}. Training details will follow shortly.",
   },
   {
     id: "compliance",
     label: "Compliance reminder",
-    text: "Hi {first_name}, we're missing some outstanding paperwork for your registration at Garlandale FC ({age_group})'s. Please reach out to the club office so we can get this sorted.",
+    text: "Hi {first_name}, we're missing some outstanding paperwork for your registration at Garlandale FC ({age_group}). Please reach out to the club office so we can get this sorted.",
   },
   {
     id: "training",
     label: "Training update",
-    text: "Hi {first_name}, a quick note from Garlandale FC re: {age_group}'s training this week — please check the club noticeboard for the latest schedule.",
+    text: "Hi {first_name}, a quick note from Garlandale FC re: {age_group} training this week — please check the club noticeboard for the latest schedule.",
   },
   {
     id: "custom",
@@ -650,6 +692,8 @@ function fromDbPlayer(row) {
     regNo: row.reg_no || "",
     squadNumber: row.squad_number === null || row.squad_number === undefined ? "" : row.squad_number,
     tierId: row.tier_id || "",
+    active: row.active === false ? false : true,
+    statusLog: (row.player_status_log || []).map((s) => ({ id: s.id, status: s.status, changedAt: s.changed_at })),
     payments: (row.payments || [])
       .map((p) => ({ id: p.id, amount: Number(p.amount), date: p.date, method: p.method }))
       .sort((a, b) => new Date(b.date) - new Date(a.date)),
@@ -671,6 +715,7 @@ function toDbPlayer(form) {
     reg_no: form.regNo && form.regNo.trim() ? form.regNo.trim() : null,
     squad_number: form.squadNumber === "" || form.squadNumber === null || form.squadNumber === undefined ? null : Number(form.squadNumber),
     tier_id: form.tierId || null,
+    active: form.active === false ? false : true,
   };
 }
 
@@ -789,6 +834,7 @@ export default function App() {
   const [saveError, setSaveError] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [ageFilter, setAgeFilter] = useState("All");
+  const [includeInactive, setIncludeInactive] = useState(false);
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [editingPlayer, setEditingPlayer] = useState(null); // player object or "new" or null
@@ -845,7 +891,7 @@ export default function App() {
     try {
       const { data: rows, error } = await supabase
         .from("players")
-        .select("*, payments(*)")
+        .select("*, payments(*), player_status_log(*)")
         .order("name", { ascending: true });
       if (error) throw error;
       setPlayers((rows || []).map(fromDbPlayer));
@@ -953,35 +999,55 @@ export default function App() {
     });
   }, [players, tiers]);
 
+  const visiblePlayers = useMemo(() => {
+    return includeInactive ? enriched : enriched.filter((p) => p.active);
+  }, [enriched, includeInactive]);
+
   const filtered = useMemo(() => {
-    return enriched.filter((p) => {
+    return visiblePlayers.filter((p) => {
       if (ageFilter !== "All" && p.ageGroup !== ageFilter) return false;
       if (statusFilter !== "All" && p.status !== statusFilter) return false;
       if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [enriched, ageFilter, statusFilter, search]);
+  }, [visiblePlayers, ageFilter, statusFilter, search]);
 
   const stats = useMemo(() => {
-    const totalOwed = enriched.reduce((s, p) => s + Math.max(0, p.balance), 0);
-    const compliant = enriched.filter((p) => p.status === "green").length;
-    const nonCompliant = enriched.filter((p) => p.status === "red").length;
-    const dueSoon = enriched.filter((p) => p.status === "amber").length;
-    return { total: enriched.length, totalOwed, compliant, nonCompliant, dueSoon };
-  }, [enriched]);
+    const totalOwed = visiblePlayers.reduce((s, p) => s + Math.max(0, p.balance), 0);
+    const compliant = visiblePlayers.filter((p) => p.status === "green").length;
+    const nonCompliant = visiblePlayers.filter((p) => p.status === "red").length;
+    const dueSoon = visiblePlayers.filter((p) => p.status === "amber").length;
+    return { total: visiblePlayers.length, totalOwed, compliant, nonCompliant, dueSoon };
+  }, [visiblePlayers]);
 
   async function savePlayer(form) {
     setSaveError(false);
     const payload = toDbPlayer(form);
     try {
       if (form.id) {
+        const existing = players.find((p) => p.id === form.id);
         const { error } = await supabase.from("players").update(payload).eq("id", form.id);
         if (error) throw error;
-        setPlayers((prev) => prev.map((p) => (p.id === form.id ? { ...p, ...form } : p)));
+
+        let newStatusLog = existing?.statusLog || [];
+        if (existing && existing.active !== !!form.active) {
+          const newStatus = form.active ? "active" : "inactive";
+          const changedAt = new Date().toISOString();
+          const { data: logRow, error: logErr } = await supabase
+            .from("player_status_log")
+            .insert({ player_id: form.id, status: newStatus, changed_at: changedAt })
+            .select()
+            .single();
+          if (!logErr && logRow) {
+            newStatusLog = [...newStatusLog, { id: logRow.id, status: logRow.status, changedAt: logRow.changed_at }];
+          }
+        }
+
+        setPlayers((prev) => prev.map((p) => (p.id === form.id ? { ...p, ...form, statusLog: newStatusLog } : p)));
       } else {
         const { data: inserted, error } = await supabase.from("players").insert(payload).select().single();
         if (error) throw error;
-        setPlayers((prev) => [...prev, fromDbPlayer({ ...inserted, payments: [] })]);
+        setPlayers((prev) => [...prev, fromDbPlayer({ ...inserted, payments: [], player_status_log: [] })]);
       }
       setEditingPlayer(null);
       return null;
@@ -1379,6 +1445,7 @@ export default function App() {
             { id: "matchday", label: "Matchday", icon: "⚽" },
             { id: "kit", label: "Kit", icon: "▦" },
             { id: "backups", label: "Backups", icon: "⟳" },
+            { id: "fixtures-post", label: "Fixtures Post", icon: "🖼" },
             { id: "messages", label: "Messages", icon: "✉" },
           ].map((n) => (
             <button
@@ -1399,7 +1466,13 @@ export default function App() {
       {/* MAIN */}
       <main className="gfc-main">
         {tab === "dashboard" && (
-          <DashboardView stats={stats} enriched={enriched} onGoSquad={(status) => { setTab("squad"); setStatusFilter(status); setAgeFilter("All"); }} />
+          <DashboardView
+            stats={stats}
+            enriched={visiblePlayers}
+            includeInactive={includeInactive}
+            setIncludeInactive={setIncludeInactive}
+            onGoSquad={(status) => { setTab("squad"); setStatusFilter(status); setAgeFilter("All"); }}
+          />
         )}
 
         {tab === "squad" && (
@@ -1412,6 +1485,8 @@ export default function App() {
             setStatusFilter={setStatusFilter}
             search={search}
             setSearch={setSearch}
+            includeInactive={includeInactive}
+            setIncludeInactive={setIncludeInactive}
             onAdd={() => setEditingPlayer("new")}
             onEdit={(p) => setEditingPlayer(p)}
             onOpenLedger={(p) => setLedgerPlayerId(p.id)}
@@ -1420,8 +1495,10 @@ export default function App() {
 
         {tab === "subscriptions" && (
           <SubscriptionsView
-            enriched={enriched}
+            enriched={visiblePlayers}
             tiers={tiers}
+            includeInactive={includeInactive}
+            setIncludeInactive={setIncludeInactive}
             onOpenLedger={(p) => setLedgerPlayerId(p.id)}
             onManageTiers={() => setManagingTiers(true)}
           />
@@ -1466,6 +1543,8 @@ export default function App() {
             lastMessage={backupMessage}
           />
         )}
+
+        {tab === "fixtures-post" && <FixturesPostView />}
 
         {tab === "messages" && (
           <MessagesView
@@ -1544,7 +1623,7 @@ export default function App() {
 }
 /* ---------- DASHBOARD ---------- */
 
-function DashboardView({ stats, enriched, onGoSquad }) {
+function DashboardView({ stats, enriched, includeInactive, setIncludeInactive, onGoSquad }) {
   const worstOwed = [...enriched].filter((p) => p.balance > 0).sort((a, b) => b.balance - a.balance).slice(0, 5);
 
   return (
@@ -1554,6 +1633,7 @@ function DashboardView({ stats, enriched, onGoSquad }) {
           <div className="gfc-page-title gfc-display">Dashboard</div>
           <div className="gfc-page-sub">Club snapshot, {fmtDate(todayISO())}</div>
         </div>
+        <InactiveToggle includeInactive={includeInactive} setIncludeInactive={setIncludeInactive} />
       </div>
 
       <div className="gfc-stat-row">
@@ -1621,7 +1701,7 @@ function DashboardView({ stats, enriched, onGoSquad }) {
 }
 /* ---------- SQUAD (ROSTER + AGE GROUPS) ---------- */
 
-function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter, setStatusFilter, search, setSearch, onAdd, onEdit, onOpenLedger }) {
+function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter, setStatusFilter, search, setSearch, includeInactive, setIncludeInactive, onAdd, onEdit, onOpenLedger }) {
   const [viewMode, setViewMode] = useState("cards"); // 'cards' or 'list'
 
   return (
@@ -1631,7 +1711,10 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
           <div className="gfc-page-title gfc-display">Squad</div>
           <div className="gfc-page-sub">{filtered.length} player{filtered.length === 1 ? "" : "s"} shown</div>
         </div>
-        <button className="gfc-btn gfc-btn-primary" onClick={onAdd}>+ Add player</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <InactiveToggle includeInactive={includeInactive} setIncludeInactive={setIncludeInactive} />
+          <button className="gfc-btn gfc-btn-primary" onClick={onAdd}>+ Add player</button>
+        </div>
       </div>
 
       <div className="gfc-filters" style={{ marginBottom: 16, justifyContent: "space-between" }}>
@@ -1651,6 +1734,7 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
             <option value="green">Compliant</option>
             <option value="amber">Payment due</option>
             <option value="red">Non-compliant</option>
+            <option value="inactive">Inactive</option>
           </select>
         </div>
         <div style={{ display: "flex", gap: 4, background: T.paperDim, borderRadius: 8, padding: 3 }}>
@@ -1754,7 +1838,7 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
 }
 /* ---------- SUBSCRIPTIONS ---------- */
 
-function SubscriptionsView({ enriched, tiers, onOpenLedger, onManageTiers }) {
+function SubscriptionsView({ enriched, tiers, includeInactive, setIncludeInactive, onOpenLedger, onManageTiers }) {
   const sorted = [...enriched].sort((a, b) => b.balance - a.balance);
   const totalDue = enriched.reduce((s, p) => s + p.due, 0);
   const totalPaid = enriched.reduce((s, p) => s + p.paid, 0);
@@ -1767,7 +1851,10 @@ function SubscriptionsView({ enriched, tiers, onOpenLedger, onManageTiers }) {
           <div className="gfc-page-title gfc-display">Subscriptions</div>
           <div className="gfc-page-sub">Season runs January–October · fees, payments, and running balances</div>
         </div>
-        <button className="gfc-btn gfc-btn-outline" onClick={onManageTiers}>Manage tiers</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <InactiveToggle includeInactive={includeInactive} setIncludeInactive={setIncludeInactive} />
+          <button className="gfc-btn gfc-btn-outline" onClick={onManageTiers}>Manage tiers</button>
+        </div>
       </div>
 
       <div className="gfc-stat-row">
@@ -1995,6 +2082,7 @@ function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers }
     notes: player?.notes || "",
     regNo: player?.regNo || "",
     squadNumber: player?.squadNumber ?? "",
+    active: player?.active ?? true,
   }));
   const [regNoError, setRegNoError] = useState("");
 
@@ -2019,6 +2107,26 @@ function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers }
           <div className="gfc-modal-title gfc-display">{player ? "Edit player" : "Add player"}</div>
           <button className="gfc-modal-close" onClick={onClose}>×</button>
         </div>
+        {player && (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            background: form.active ? T.greenSoft : T.paperDim, border: `1px solid ${form.active ? T.green : T.line}`,
+            borderRadius: 8, padding: "10px 14px", marginBottom: 16,
+          }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13, color: form.active ? T.green : T.inkSoft }}>
+                {form.active ? "Active player" : "Inactive player"}
+              </div>
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 2 }}>
+                {form.active ? "Subscription fees accrue normally." : "No subscription fees accrue while inactive."}
+              </div>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}>
+              <input type="checkbox" checked={form.active} onChange={(e) => update("active", e.target.checked)} />
+              {form.active ? "Mark inactive" : "Mark active"}
+            </label>
+          </div>
+        )}
         <form onSubmit={handleSubmit}>
           <div className="gfc-field">
             <label className="gfc-label">Full name</label>
@@ -3084,6 +3192,273 @@ function BackupsView({ backups, onRefresh, onBackupNow, onRestore, onDownload, o
         <button className="gfc-btn gfc-btn-outline" onClick={() => fileInputRef.current?.click()} disabled={busy}>
           Choose backup file…
         </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- FIXTURES POST (Instagram graphic generator) ---------- */
+
+const FIXTURE_TEXT_PLACEHOLDER = `29 April 2026
+GFC Reserves vs Barmsley Spurs | 19h00 | Hickory Rd
+GFC 1st Team vs Barmsley Spurs | 20h30 | Hickory Rd
+
+01 May 2026
+GFC Over 40 vs Sunningdale | 19h00 | Sunningdale
+
+02 May 2026 - Fish Hoek
+GFC Under 7 vs Fish Hoek | 08h30 | Minis 1
+GFC Under 8 vs Fish Hoek | 08h30 | Minis 2`;
+
+function parseFixtureText(text) {
+  const lines = text.split("\n").map((l) => l.trim());
+  const groups = [];
+  let current = null;
+  for (const line of lines) {
+    if (!line) continue;
+    if (line.includes("|")) {
+      if (!current) {
+        current = { headerRaw: "Fixtures", rows: [] };
+        groups.push(current);
+      }
+      const parts = line.split("|").map((p) => p.trim());
+      const matchup = parts[0] || "";
+      const time = parts[1] || "";
+      const venue = parts[2] || "";
+      let team = matchup;
+      let vs = "";
+      const vsMatch = matchup.match(/^(.*?)\s+vs\.?\s+(.*)$/i);
+      if (vsMatch) {
+        team = vsMatch[1].trim();
+        vs = vsMatch[2].trim();
+      }
+      current.rows.push({ team, vs, time, venue });
+    } else {
+      current = { headerRaw: line, rows: [] };
+      groups.push(current);
+    }
+  }
+  return groups;
+}
+
+function formatFixtureHeader(headerRaw) {
+  let datePart = headerRaw;
+  let suffix = "";
+  const dashSplit = headerRaw.split(/\s+-\s+/);
+  if (dashSplit.length === 2) {
+    datePart = dashSplit[0].trim();
+    suffix = dashSplit[1].trim();
+  }
+  const parsed = new Date(datePart);
+  let label;
+  if (!isNaN(parsed)) {
+    label = parsed
+      .toLocaleDateString("en-ZA", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
+      .toUpperCase();
+  } else {
+    label = headerRaw.toUpperCase();
+  }
+  return suffix ? `${label} – ${suffix.toUpperCase()}` : label;
+}
+
+function FixturesPostView() {
+  const [rawText, setRawText] = useState(FIXTURE_TEXT_PLACEHOLDER);
+  const [dateRangeLabel, setDateRangeLabel] = useState("29 APRIL – 02 MAY 2026");
+  const [handle, setHandle] = useState("@GARLANDALEFC");
+  const [hashtag, setHashtag] = useState("#WEAREGARLANDALE");
+  const [downloading, setDownloading] = useState(false);
+  const posterRef = React.useRef(null);
+
+  const groups = useMemo(() => parseFixtureText(rawText), [rawText]);
+
+  async function handleDownload() {
+    if (!posterRef.current) return;
+    setDownloading(true);
+    try {
+      const canvas = await html2canvas(posterRef.current, { scale: 2, backgroundColor: null, useCORS: true });
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `garlandale-fixtures-${todayISO()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, "image/png");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div>
+      <div className="gfc-topbar">
+        <div>
+          <div className="gfc-page-title gfc-display">Fixtures Post</div>
+          <div className="gfc-page-sub">Paste this week's fixtures, preview the poster, download for Instagram</div>
+        </div>
+        <button className="gfc-btn gfc-btn-primary" onClick={handleDownload} disabled={downloading}>
+          {downloading ? "Preparing…" : "Download image"}
+        </button>
+      </div>
+
+      <div className="gfc-row2" style={{ gridTemplateColumns: "380px 1fr", alignItems: "flex-start" }}>
+        <div className="gfc-panel" style={{ padding: 16 }}>
+          <div className="gfc-panel-title" style={{ marginBottom: 10 }}>Fixture list</div>
+          <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>
+            One line per date (starts a new green banner), then fixture lines under it as:
+            <br /><code className="gfc-mono">Team vs Opponent | Time | Venue</code>
+            <br />Add "- Location" after a date to show a location suffix, e.g. <code className="gfc-mono">02 May 2026 - Fish Hoek</code>.
+          </div>
+          <textarea
+            className="gfc-textarea"
+            style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, minHeight: 260 }}
+            rows={16}
+            value={rawText}
+            onChange={(e) => setRawText(e.target.value)}
+          />
+
+          <div className="gfc-field" style={{ marginTop: 14 }}>
+            <label className="gfc-label">Date range subtitle</label>
+            <input className="gfc-input" value={dateRangeLabel} onChange={(e) => setDateRangeLabel(e.target.value)} />
+          </div>
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Social handle</label>
+              <input className="gfc-input" value={handle} onChange={(e) => setHandle(e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Hashtag</label>
+              <input className="gfc-input" value={hashtag} onChange={(e) => setHashtag(e.target.value)} />
+            </div>
+          </div>
+        </div>
+
+        <PosterPreviewFrame>
+          <div ref={posterRef}>
+            <FixturePoster groups={groups} dateRangeLabel={dateRangeLabel} handle={handle} hashtag={hashtag} />
+          </div>
+        </PosterPreviewFrame>
+      </div>
+    </div>
+  );
+}
+
+function PosterPreviewFrame({ children }) {
+  const outerRef = React.useRef(null);
+  const innerRef = React.useRef(null);
+  const [scale, setScale] = useState(1);
+  const [innerHeight, setInnerHeight] = useState(0);
+
+  useEffect(() => {
+    function recompute() {
+      if (!outerRef.current || !innerRef.current) return;
+      const availableWidth = outerRef.current.clientWidth;
+      const naturalWidth = 1080;
+      const s = Math.min(1, availableWidth / naturalWidth);
+      setScale(s);
+      setInnerHeight(innerRef.current.scrollHeight);
+    }
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    if (outerRef.current) ro.observe(outerRef.current);
+    const mo = new MutationObserver(recompute);
+    if (innerRef.current) mo.observe(innerRef.current, { childList: true, subtree: true, characterData: true });
+    return () => { ro.disconnect(); mo.disconnect(); };
+  }, []);
+
+  return (
+    <div ref={outerRef} className="gfc-panel" style={{ padding: 12, overflow: "hidden" }}>
+      <div style={{ height: innerHeight * scale || "auto" }}>
+        <div ref={innerRef} style={{ transform: `scale(${scale})`, transformOrigin: "top left", width: 1080 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FixturePoster({ groups, dateRangeLabel, handle, hashtag }) {
+  return (
+    <div
+      style={{
+        width: 1080,
+        background: "linear-gradient(155deg, #0d0a1f 0%, #1a1338 45%, #123322 100%)",
+        padding: 48,
+        display: "flex",
+        gap: 40,
+        fontFamily: "'Karla', sans-serif",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div style={{ position: "absolute", top: -120, left: -120, width: 400, height: 400, background: "radial-gradient(circle, rgba(232,172,46,0.18), transparent 70%)" }} />
+      <div style={{ position: "absolute", bottom: -140, right: -140, width: 460, height: 460, background: "radial-gradient(circle, rgba(30,122,65,0.28), transparent 70%)" }} />
+
+      {/* LEFT: branding */}
+      <div style={{ width: 380, flexShrink: 0, position: "relative", zIndex: 1, display: "flex", flexDirection: "column" }}>
+        <div style={{ color: T.gold, fontFamily: "'Anton', sans-serif", fontSize: 26, letterSpacing: 2 }}>GARLANDALE FC</div>
+        <div style={{ color: "#fff", fontFamily: "'Anton', sans-serif", fontSize: 84, lineHeight: 0.95, marginTop: 4, textTransform: "uppercase" }}>Fixtures</div>
+        <div style={{ display: "inline-block", marginTop: 18, background: T.green, color: "#fff", fontWeight: 800, fontSize: 20, padding: "8px 16px", borderRadius: 4, alignSelf: "flex-start" }}>
+          {dateRangeLabel}
+        </div>
+
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "30px 0" }}>
+          <img src={BADGE_SRC} alt="Garlandale FC crest" style={{ width: 260, height: 260 }} />
+        </div>
+
+        <div style={{ display: "flex", gap: 14, color: "#fff", fontSize: 13, fontWeight: 700, flexWrap: "wrap" }}>
+          <span>👥 TOGETHER</span>
+          <span style={{ color: T.gold }}>|</span>
+          <span>❤️ PASSION</span>
+          <span style={{ color: T.gold }}>|</span>
+          <span>📈 PROGRESS</span>
+        </div>
+        <div style={{ marginTop: 10, color: "#fff", fontSize: 14, fontWeight: 700 }}>
+          📷 📘 {handle}
+        </div>
+        <div style={{ marginTop: 14, fontFamily: "'Anton', sans-serif", fontSize: 30 }}>
+          <span style={{ color: "#fff" }}>{hashtag.replace(/garlandale/i, "").toUpperCase() === hashtag.toUpperCase() ? hashtag : hashtag}</span>
+        </div>
+      </div>
+
+      {/* RIGHT: fixture groups */}
+      <div style={{ flex: 1, position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: 22 }}>
+        {groups.length === 0 && (
+          <div style={{ color: "#fff", opacity: 0.6, fontSize: 16, padding: 20 }}>
+            Paste fixtures on the left to see them appear here.
+          </div>
+        )}
+        {groups.map((g, gi) => (
+          <div key={gi} style={{ borderRadius: 6, overflow: "hidden", border: "1px solid rgba(232,172,46,0.4)" }}>
+            <div style={{ background: T.green, color: "#fff", fontWeight: 800, fontSize: 19, padding: "10px 16px", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              📅 {formatFixtureHeader(g.headerRaw)}
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#0d0a1f" }}>
+                  {["Team", "Vs", "Time", "Venue"].map((h) => (
+                    <th key={h} style={{ color: T.gold, textTransform: "uppercase", fontSize: 12, fontWeight: 800, padding: "8px 12px", textAlign: "left", borderBottom: "1px solid rgba(232,172,46,0.3)" }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {g.rows.map((r, ri) => (
+                  <tr key={ri} style={{ background: ri % 2 === 0 ? "#161029" : "#1c1738" }}>
+                    <td style={{ color: "#fff", fontWeight: 700, fontSize: 14, padding: "9px 12px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>{r.team}</td>
+                    <td style={{ color: "#fff", fontSize: 14, padding: "9px 12px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>{r.vs}</td>
+                    <td style={{ color: T.gold, fontWeight: 800, fontSize: 14, padding: "9px 12px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>{r.time}</td>
+                    <td style={{ color: "#fff", fontSize: 14, padding: "9px 12px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>{r.venue}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
       </div>
     </div>
   );
