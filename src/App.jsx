@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { supabase } from "./supabaseClient";
+import { supabase, initialUrlHash } from "./supabaseClient";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { BarChart, Bar, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
@@ -4206,19 +4206,16 @@ export default function AppRoot() {
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [role, setRole] = useState(null);
-  const [isInviteFlow, setIsInviteFlow] = useState(false);
+  // Evaluated once, from the hash captured the instant supabaseClient.js
+  // loaded - NOT from window.location.hash here, since Supabase's client
+  // may have already auto-processed and cleared the real one by the time
+  // this component's effects run (a race that previously caused invited
+  // users to get silently logged in without ever setting a password).
+  const [isInviteFlow, setIsInviteFlow] = useState(
+    () => initialUrlHash.includes("type=invite") || initialUrlHash.includes("type=recovery")
+  );
 
   useEffect(() => {
-    // Supabase puts invite/recovery tokens in the URL hash - if present,
-    // treat this load as "finish setting up your account" rather than a
-    // normal login, regardless of whether a session already exists.
-    if (typeof window !== "undefined" && window.location.hash.includes("type=invite")) {
-      setIsInviteFlow(true);
-    }
-    if (typeof window !== "undefined" && window.location.hash.includes("type=recovery")) {
-      setIsInviteFlow(true);
-    }
-
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session || null);
       setAuthLoading(false);

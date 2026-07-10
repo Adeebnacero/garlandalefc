@@ -20,4 +20,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+// Capture the URL hash THE INSTANT this module loads, before Supabase's
+// client below gets a chance to auto-process (and clear) any invite/
+// recovery token in it. Without this, there's a timing race where the
+// app can miss that this was a fresh invite link and skip straight to
+// "logged in" without ever prompting the user to set a password.
+export const initialUrlHash = typeof window !== "undefined" ? window.location.hash : "";
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
