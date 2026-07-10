@@ -653,6 +653,26 @@ function smsLink(phone, text) {
   return `sms:${phone || ""}?body=${encodeURIComponent(text)}`;
 }
 
+/**
+ * supabase.functions.invoke() only gives a generic "non-2xx status code"
+ * message on the `error` object when the function itself returns an error
+ * response - the actual reason (e.g. "Only an Admin can invite new staff")
+ * is in the response body, reachable via error.context. This digs it out,
+ * falling back to the generic message if that's not possible for some reason.
+ */
+async function extractFunctionErrorMessage(error, fallbackData) {
+  if (fallbackData?.error) return fallbackData.error;
+  if (error?.context && typeof error.context.json === "function") {
+    try {
+      const body = await error.context.clone().json();
+      if (body?.error) return body.error;
+    } catch (e) {
+      // context wasn't JSON - fall through to the generic message
+    }
+  }
+  return error?.message || "Unknown error.";
+}
+
 function fillTemplate(tpl, player) {
   const { balance } = playerFinance(player);
   return tpl
@@ -835,8 +855,10 @@ async function sendStatementEmail(player, clubSettings) {
         pdfFilename: `${player.name.replace(/\s+/g, "_")}_statement.pdf`,
       },
     });
-    if (error) throw error;
-    if (data?.error) throw new Error(data.error);
+    if (error || data?.error) {
+      const msg = await extractFunctionErrorMessage(error, data);
+      throw new Error(msg);
+    }
     return { success: true };
   } catch (e) {
     return { error: e.message || "Failed to send email." };
@@ -1107,12 +1129,13 @@ function MainApp({ role, onLogout }) {
     setUsersBusy(true);
     setUsersMessage("");
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
       const { data, error } = await supabase.functions.invoke("invite-user", {
         body: { email, role: roleToAssign, redirectTo: window.location.origin },
       });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error || data?.error) {
+        const msg = await extractFunctionErrorMessage(error, data);
+        throw new Error(msg);
+      }
       setUsersMessage(`Invited ${email} as ${roleToAssign}.`);
       await loadStaffList();
     } catch (e) {
