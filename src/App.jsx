@@ -998,12 +998,12 @@ function toDbItem(form) {
 
 const CLUB_NAME = "Garlandale FC";
 
-export default function App() {
+function MainApp({ role, onLogout }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState(false);
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = useState(role === "coach" ? "squad" : "dashboard");
   const [ageFilter, setAgeFilter] = useState("All");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [statusFilter, setStatusFilter] = useState("All");
@@ -1036,6 +1036,10 @@ export default function App() {
   });
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailMessage, setEmailMessage] = useState("");
+
+  const [staffList, setStaffList] = useState([]);
+  const [usersBusy, setUsersBusy] = useState(false);
+  const [usersMessage, setUsersMessage] = useState("");
 
   const loadTiers = useCallback(async () => {
     try {
@@ -1085,6 +1089,52 @@ export default function App() {
     } catch (e) {
       setSaveError(true);
       return e.message || "Could not save settings.";
+    }
+  }
+
+  const loadStaffList = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("staff").select("*").order("invited_at", { ascending: false });
+      if (error) throw error; // non-admins get an RLS-denied error here, which is expected and fine
+      setStaffList(rows || []);
+    } catch (e) {
+      // Silent for non-admins - they simply can't see this table, by design.
+    }
+  }, []);
+
+  async function inviteStaffMember(email, roleToAssign) {
+    setUsersBusy(true);
+    setUsersMessage("");
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const { data, error } = await supabase.functions.invoke("invite-user", {
+        body: { email, role: roleToAssign, redirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setUsersMessage(`Invited ${email} as ${roleToAssign}.`);
+      await loadStaffList();
+    } catch (e) {
+      setUsersMessage(`Failed to invite ${email}: ${e.message || "unknown error"}`);
+    } finally {
+      setUsersBusy(false);
+    }
+  }
+
+  async function removeStaffMember(staffId) {
+    const confirmed = window.confirm("Remove this person's access to the app? Their login will still exist, but they won't be able to see or change anything until re-invited.");
+    if (!confirmed) return;
+    setUsersBusy(true);
+    setUsersMessage("");
+    try {
+      const { error } = await supabase.from("staff").delete().eq("id", staffId);
+      if (error) throw error;
+      await loadStaffList();
+      setUsersMessage("Access removed.");
+    } catch (e) {
+      setUsersMessage(`Failed to remove access: ${e.message || "unknown error"}`);
+    } finally {
+      setUsersBusy(false);
     }
   }
 
@@ -1196,7 +1246,8 @@ export default function App() {
     loadTiers();
     loadBackups();
     loadClubSettings();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings]);
+    loadStaffList();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -1693,16 +1744,17 @@ export default function App() {
         </div>
         <nav className="gfc-nav">
           {[
-            { id: "dashboard", label: "Dashboard", icon: "◆" },
-            { id: "squad", label: "Squad", icon: "▤" },
-            { id: "subscriptions", label: "Subscriptions", icon: "$" },
-            { id: "matchday", label: "Matchday", icon: "⚽" },
-            { id: "kit", label: "Kit", icon: "▦" },
-            { id: "backups", label: "Backups", icon: "⟳" },
-            { id: "fixtures-post", label: "Fixtures Post", icon: "🖼" },
-            { id: "settings", label: "Settings", icon: "⚙" },
-            { id: "messages", label: "Messages", icon: "✉" },
-          ].map((n) => (
+            { id: "dashboard", label: "Dashboard", icon: "◆", roles: ["admin", "treasurer"] },
+            { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
+            { id: "subscriptions", label: "Subscriptions", icon: "$", roles: ["admin", "treasurer"] },
+            { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
+            { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
+            { id: "backups", label: "Backups", icon: "⟳", roles: ["admin"] },
+            { id: "fixtures-post", label: "Fixtures Post", icon: "🖼", roles: ["admin", "treasurer"] },
+            { id: "settings", label: "Settings", icon: "⚙", roles: ["admin", "treasurer"] },
+            { id: "messages", label: "Messages", icon: "✉", roles: ["admin", "treasurer"] },
+            { id: "users", label: "Users", icon: "👤", roles: ["admin"] },
+          ].filter((n) => n.roles.includes(role)).map((n) => (
             <button
               key={n.id}
               className={`gfc-nav-item ${tab === n.id ? "active" : ""}`}
@@ -1714,7 +1766,14 @@ export default function App() {
           ))}
         </nav>
         <div className="gfc-sidebar-foot">
-          {saveError ? "⚠ Last change didn't save — check connection" : "Connected to Supabase"}
+          <div style={{ marginBottom: 8, textTransform: "capitalize" }}>{role} account</div>
+          <button
+            onClick={onLogout}
+            style={{ background: "none", border: "none", color: T.gold, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 8 }}
+          >
+            Log out
+          </button>
+          <div>{saveError ? "⚠ Last change didn't save — check connection" : "Connected to Supabase"}</div>
         </div>
       </aside>
 
@@ -1742,6 +1801,7 @@ export default function App() {
             setSearch={setSearch}
             includeInactive={includeInactive}
             setIncludeInactive={setIncludeInactive}
+            role={role}
             onAdd={() => setEditingPlayer("new")}
             onEdit={(p) => setEditingPlayer(p)}
             onOpenLedger={(p) => setLedgerPlayerId(p.id)}
@@ -1803,6 +1863,16 @@ export default function App() {
 
         {tab === "settings" && (
           <SettingsView clubSettings={clubSettings} onSave={saveClubSettings} />
+        )}
+
+        {tab === "users" && (
+          <UsersView
+            staffList={staffList}
+            onInvite={inviteStaffMember}
+            onRemove={removeStaffMember}
+            busy={usersBusy}
+            message={usersMessage}
+          />
         )}
 
         {tab === "messages" && (
@@ -2032,7 +2102,8 @@ function DashboardView({ stats, enriched, includeInactive, setIncludeInactive, o
 }
 /* ---------- SQUAD (ROSTER + AGE GROUPS) ---------- */
 
-function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter, setStatusFilter, search, setSearch, includeInactive, setIncludeInactive, onAdd, onEdit, onOpenLedger }) {
+function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter, setStatusFilter, search, setSearch, includeInactive, setIncludeInactive, role, onAdd, onEdit, onOpenLedger }) {
+  const hideFinancials = role === "coach";
   const [viewMode, setViewMode] = useState("cards"); // 'cards' or 'list'
 
   return (
@@ -2133,18 +2204,22 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
                   <span className="gfc-agepill">{p.ageGroup}</span>
                   {p.over40 && <span className="gfc-agepill" style={{ background: T.goldDeep }}>Over 40</span>}
                 </span>
-                <span className="gfc-card-balance" style={{ color: p.balance > 0 ? T.danger : T.green }}>
-                  {p.balance > 0 ? fmtMoney(p.balance) + " due" : "Paid up"}
-                </span>
+                {!hideFinancials && (
+                  <span className="gfc-card-balance" style={{ color: p.balance > 0 ? T.danger : T.green }}>
+                    {p.balance > 0 ? fmtMoney(p.balance) + " due" : "Paid up"}
+                  </span>
+                )}
               </div>
               <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Badge status={p.status} />
-                <button
-                  className="gfc-btn gfc-btn-ghost gfc-btn-sm"
-                  onClick={(e) => { e.stopPropagation(); onOpenLedger(p); }}
-                >
-                  View ledger →
-                </button>
+                <Badge status={hideFinancials && p.status !== "inactive" ? (p.documentsComplete ? "green" : "red") : p.status} />
+                {!hideFinancials && (
+                  <button
+                    className="gfc-btn gfc-btn-ghost gfc-btn-sm"
+                    onClick={(e) => { e.stopPropagation(); onOpenLedger(p); }}
+                  >
+                    View ledger →
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -2158,10 +2233,10 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
                 <th>Age group</th>
                 <th>Reg no</th>
                 <th>Phone</th>
-                <th>Tier</th>
-                <th>Balance</th>
+                {!hideFinancials && <th>Tier</th>}
+                {!hideFinancials && <th>Balance</th>}
                 <th>Compliance</th>
-                <th></th>
+                {!hideFinancials && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -2176,12 +2251,14 @@ function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter,
                   </td>
                   <td style={{ color: p.regNo ? T.ink : T.amber, fontWeight: p.regNo ? 400 : 700 }}>{p.regNo || "Pending"}</td>
                   <td>{p.phone || "—"}</td>
-                  <td>{p.tierName || <span style={{ color: T.amber, fontWeight: 700 }}>No tier</span>}</td>
-                  <td className="gfc-mono" style={{ fontWeight: 700, color: p.balance > 0 ? T.danger : T.green }}>{fmtMoney(p.balance)}</td>
-                  <td><Badge status={p.status} /></td>
-                  <td>
-                    <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); onOpenLedger(p); }}>Ledger</button>
-                  </td>
+                  {!hideFinancials && <td>{p.tierName || <span style={{ color: T.amber, fontWeight: 700 }}>No tier</span>}</td>}
+                  {!hideFinancials && <td className="gfc-mono" style={{ fontWeight: 700, color: p.balance > 0 ? T.danger : T.green }}>{fmtMoney(p.balance)}</td>}
+                  <td><Badge status={hideFinancials && p.status !== "inactive" ? (p.documentsComplete ? "green" : "red") : p.status} /></td>
+                  {!hideFinancials && (
+                    <td>
+                      <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); onOpenLedger(p); }}>Ledger</button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -3931,4 +4008,286 @@ function SettingsView({ clubSettings, onSave }) {
       </form>
     </div>
   );
+}
+
+/* ---------- USERS (staff management, admin only) ---------- */
+
+const ROLE_LABEL = { admin: "Admin", treasurer: "Treasurer", coach: "Coach" };
+
+function UsersView({ staffList, onInvite, onRemove, busy, message }) {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("coach");
+
+  function handleInvite(e) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    onInvite(email.trim(), role);
+    setEmail("");
+  }
+
+  return (
+    <div>
+      <div className="gfc-topbar">
+        <div>
+          <div className="gfc-page-title gfc-display">Users</div>
+          <div className="gfc-page-sub">Invite staff and control who can access what</div>
+        </div>
+      </div>
+
+      <div className="gfc-panel" style={{ padding: 20, marginBottom: 18 }}>
+        <div className="gfc-panel-title" style={{ marginBottom: 12 }}>Invite someone new</div>
+        <form onSubmit={handleInvite} className="gfc-row2" style={{ gridTemplateColumns: "2fr 1fr auto", alignItems: "end", gap: 10 }}>
+          <div className="gfc-field" style={{ marginBottom: 0 }}>
+            <label className="gfc-label">Email address</label>
+            <input type="email" className="gfc-input" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          </div>
+          <div className="gfc-field" style={{ marginBottom: 0 }}>
+            <label className="gfc-label">Role</label>
+            <select className="gfc-select" value={role} onChange={(e) => setRole(e.target.value)}>
+              <option value="admin">Admin (full access)</option>
+              <option value="treasurer">Treasurer (financial only)</option>
+              <option value="coach">Coach (squad/matchday/kit only)</option>
+            </select>
+          </div>
+          <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy}>{busy ? "Sending…" : "Send invite"}</button>
+        </form>
+        {message && (
+          <div style={{ marginTop: 12, fontSize: 12.5, color: message.toLowerCase().startsWith("failed") ? T.danger : T.green, fontWeight: 600 }}>
+            {message}
+          </div>
+        )}
+      </div>
+
+      <div className="gfc-panel">
+        <div className="gfc-panel-head"><div className="gfc-panel-title">Current staff ({staffList.length})</div></div>
+        {staffList.length === 0 ? (
+          <div className="gfc-empty">No staff invited yet.</div>
+        ) : (
+          <table className="gfc-table">
+            <thead><tr><th>Email</th><th>Role</th><th>Invited</th><th></th></tr></thead>
+            <tbody>
+              {staffList.map((s) => (
+                <tr key={s.id}>
+                  <td style={{ fontWeight: 600 }}>{s.email}</td>
+                  <td><span className="gfc-agepill">{ROLE_LABEL[s.role] || s.role}</span></td>
+                  <td>{fmtDate(s.invited_at)}</td>
+                  <td><button className="gfc-btn gfc-btn-danger gfc-btn-sm" onClick={() => onRemove(s.id)} disabled={busy}>Remove access</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- AUTH: LOGIN / ACCEPT INVITE ---------- */
+
+function LoginView({ onLoggedIn }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInErr) throw signInErr;
+      onLoggedIn();
+    } catch (e) {
+      setError(e.message || "Could not log in.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="gfc-app" style={{ alignItems: "center", justifyContent: "center" }}>
+      <style>{GLOBAL_CSS}</style>
+      <div style={{ width: 360, background: "#fff", border: `1px solid ${T.line}`, borderRadius: 14, padding: 32 }}>
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
+          <img src={BADGE_SRC} alt="Garlandale FC crest" style={{ width: 64, height: 64, margin: "0 auto 10px" }} />
+          <div className="gfc-display" style={{ color: T.indigo, fontSize: 20 }}>Garlandale FC</div>
+          <div style={{ fontSize: 12, color: T.inkSoft }}>Club Management Login</div>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="gfc-field">
+            <label className="gfc-label">Email</label>
+            <input type="email" className="gfc-input" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Password</label>
+            <input type="password" className="gfc-input" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </div>
+          {error && <div style={{ color: T.danger, fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+          <button type="submit" className="gfc-btn gfc-btn-primary" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>
+            {busy ? "Logging in…" : "Log in"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AcceptInviteView({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+    if (password !== confirm) { setError("Passwords don't match."); return; }
+    setBusy(true);
+    try {
+      const { error: updateErr } = await supabase.auth.updateUser({ password });
+      if (updateErr) throw updateErr;
+      onDone();
+    } catch (e) {
+      setError(e.message || "Could not set password.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="gfc-app" style={{ alignItems: "center", justifyContent: "center" }}>
+      <style>{GLOBAL_CSS}</style>
+      <div style={{ width: 380, background: "#fff", border: `1px solid ${T.line}`, borderRadius: 14, padding: 32 }}>
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
+          <img src={BADGE_SRC} alt="Garlandale FC crest" style={{ width: 64, height: 64, margin: "0 auto 10px" }} />
+          <div className="gfc-display" style={{ color: T.indigo, fontSize: 18 }}>Welcome to Garlandale FC</div>
+          <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 4 }}>Set a password to finish setting up your account</div>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="gfc-field">
+            <label className="gfc-label">New password</label>
+            <input type="password" className="gfc-input" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Confirm password</label>
+            <input type="password" className="gfc-input" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+          </div>
+          {error && <div style={{ color: T.danger, fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+          <button type="submit" className="gfc-btn gfc-btn-primary" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>
+            {busy ? "Saving…" : "Set password & continue"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function NoAccessView({ email, onLogout }) {
+  return (
+    <div className="gfc-app" style={{ alignItems: "center", justifyContent: "center" }}>
+      <style>{GLOBAL_CSS}</style>
+      <div style={{ width: 380, textAlign: "center", padding: 32 }}>
+        <div className="gfc-display" style={{ color: T.danger, fontSize: 20, marginBottom: 10 }}>No access assigned</div>
+        <div style={{ fontSize: 13, color: T.inkSoft, marginBottom: 20 }}>
+          {email} is logged in, but doesn't have a role assigned in Garlandale FC yet. Ask an Admin to invite this email address, or check with them if your access may have been removed.
+        </div>
+        <button className="gfc-btn gfc-btn-outline" onClick={onLogout}>Log out</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- ROOT: auth gate ---------- */
+
+export default function AppRoot() {
+  const [authLoading, setAuthLoading] = useState(true);
+  const [session, setSession] = useState(null);
+  const [role, setRole] = useState(null);
+  const [isInviteFlow, setIsInviteFlow] = useState(false);
+
+  useEffect(() => {
+    // Supabase puts invite/recovery tokens in the URL hash - if present,
+    // treat this load as "finish setting up your account" rather than a
+    // normal login, regardless of whether a session already exists.
+    if (typeof window !== "undefined" && window.location.hash.includes("type=invite")) {
+      setIsInviteFlow(true);
+    }
+    if (typeof window !== "undefined" && window.location.hash.includes("type=recovery")) {
+      setIsInviteFlow(true);
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session || null);
+      setAuthLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
+      setSession(newSession || null);
+      if (event === "PASSWORD_RECOVERY") setIsInviteFlow(true);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  const loadRole = useCallback(async () => {
+    if (!session?.user?.id) { setRole(null); return; }
+    try {
+      const { data, error } = await supabase.from("staff").select("role").eq("user_id", session.user.id).single();
+      if (error || !data) { setRole("none"); return; }
+      setRole(data.role);
+    } catch (e) {
+      setRole("none");
+    }
+  }, [session]);
+
+  useEffect(() => {
+    if (session && !isInviteFlow) loadRole();
+  }, [session, isInviteFlow, loadRole]);
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setSession(null);
+    setRole(null);
+  }
+
+  function handleInviteDone() {
+    setIsInviteFlow(false);
+    // clear the hash so a refresh doesn't re-trigger the invite flow
+    window.history.replaceState(null, "", window.location.pathname);
+    loadRole();
+  }
+
+  if (authLoading) {
+    return (
+      <div className="gfc-app" style={{ alignItems: "center", justifyContent: "center" }}>
+        <style>{GLOBAL_CSS}</style>
+        <div style={{ color: T.indigo, fontFamily: "'Anton', sans-serif" }}>LOADING…</div>
+      </div>
+    );
+  }
+
+  if (session && isInviteFlow) {
+    return <AcceptInviteView onDone={handleInviteDone} />;
+  }
+
+  if (!session) {
+    return <LoginView onLoggedIn={() => {}} />;
+  }
+
+  if (role === null) {
+    return (
+      <div className="gfc-app" style={{ alignItems: "center", justifyContent: "center" }}>
+        <style>{GLOBAL_CSS}</style>
+        <div style={{ color: T.indigo, fontFamily: "'Anton', sans-serif" }}>LOADING…</div>
+      </div>
+    );
+  }
+
+  if (role === "none") {
+    return <NoAccessView email={session.user.email} onLogout={handleLogout} />;
+  }
+
+  return <MainApp role={role} onLogout={handleLogout} />;
 }
