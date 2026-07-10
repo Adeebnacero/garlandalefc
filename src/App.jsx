@@ -472,154 +472,23 @@ function fmtDate(d) {
   return dt.toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function computeAgeGroup(dob) {
-  if (!dob) return "Unassigned";
-  const birth = new Date(dob);
-  if (isNaN(birth)) return "Unassigned";
-  const today = new Date();
-  // English/SA grassroots convention: age-group cutoff is 31 Aug.
-  const cutoffYear = today.getMonth() >= 8 ? today.getFullYear() + 1 : today.getFullYear();
-  const age = cutoffYear - birth.getFullYear();
-  if (age >= 18) return "Seniors";
-  if (age <= 0) return "Unassigned";
-  return "U" + age;
-}
+import {
+  SEASON_START_MONTH,
+  SEASON_END_MONTH,
+  computeAgeGroup,
+  computeExactAge,
+  isOver40,
+  ageGroupSortKey,
+  sortAgeGroups,
+  buildActiveSegments,
+  monthHasActiveOverlap,
+  totalSeasonMonthsDue,
+  playerFinance,
+  complianceStatus,
+  STATUS_LABEL,
+} from "./lib/billing.js";
 
-function computeExactAge(dob) {
-  if (!dob) return null;
-  const birth = new Date(dob);
-  if (isNaN(birth)) return null;
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const hasHadBirthdayThisYear =
-    today.getMonth() > birth.getMonth() ||
-    (today.getMonth() === birth.getMonth() && today.getDate() >= birth.getDate());
-  if (!hasHadBirthdayThisYear) age -= 1;
-  return age;
-}
-
-function isOver40(dob) {
-  const age = computeExactAge(dob);
-  return age !== null && age >= 40;
-}
-
-function ageGroupSortKey(g) {
-  if (g === "Unassigned") return [3, 0];
-  if (g === "Seniors") return [2, 0];
-  const m = /^U(\d+)$/.exec(g);
-  if (m) return [0, Number(m[1])];
-  return [1, g]; // custom override text, sorted alphabetically between U-groups and Seniors
-}
-
-function sortAgeGroups(groups) {
-  return [...groups].sort((a, b) => {
-    const ka = ageGroupSortKey(a);
-    const kb = ageGroupSortKey(b);
-    if (ka[0] !== kb[0]) return ka[0] - kb[0];
-    if (typeof ka[1] === "number" && typeof kb[1] === "number") return ka[1] - kb[1];
-    return String(ka[1]).localeCompare(String(kb[1]));
-  });
-}
-
-const SEASON_START_MONTH = 0; // January (0-indexed)
-const SEASON_END_MONTH = 9;   // October (0-indexed) - last billable month of the season
-
-/**
- * Builds a timeline of active/inactive segments for a player from their
- * join date and status-change history. A player is assumed active from
- * their join date until the first logged status change; after that, each
- * logged change opens a new segment running until the next one (or to the
- * far future for the current, still-open segment).
- */
-function buildActiveSegments(joinDate, statusLog) {
-  const join = new Date(joinDate);
-  if (isNaN(join)) return [];
-  const sorted = [...(statusLog || [])]
-    .map((s) => ({ status: s.status, at: new Date(s.changedAt) }))
-    .filter((s) => !isNaN(s.at))
-    .sort((a, b) => a.at - b.at);
-
-  const segments = [];
-  let cursor = join;
-  let cursorStatus = "active";
-  for (const entry of sorted) {
-    if (entry.at > cursor) {
-      segments.push({ status: cursorStatus, start: cursor, end: entry.at });
-      cursor = entry.at;
-    }
-    cursorStatus = entry.status;
-  }
-  segments.push({ status: cursorStatus, start: cursor, end: new Date(8640000000000000) });
-  return segments;
-}
-
-function monthHasActiveOverlap(segments, monthStart, monthEnd) {
-  return segments.some((seg) => seg.status === "active" && seg.start < monthEnd && seg.end > monthStart);
-}
-
-/**
- * Season runs January (0) through October (9). November/December accrue
- * nothing. A player's very first season is pro-rated from their join month;
- * every season after that bills the full Jan-Oct run. Balances are one
- * continuous running total across every season a player has been a member
- * (unpaid amounts carry forward rather than resetting each year). Any month
- * fully covered by an inactive period is skipped entirely - no fee accrues
- * while paused, no matter how many times a player pauses and returns.
- */
-function totalSeasonMonthsDue(joinDate, statusLog, today = new Date()) {
-  const join = new Date(joinDate);
-  if (isNaN(join)) return 0;
-  const segments = buildActiveSegments(joinDate, statusLog);
-  const joinYear = join.getFullYear();
-  const joinMonth = join.getMonth();
-  if (joinMonth > SEASON_END_MONTH && today.getFullYear() === joinYear) return 0;
-
-  let count = 0;
-  for (let y = joinYear; y <= today.getFullYear(); y++) {
-    const startMonth = y === joinYear ? Math.min(joinMonth, SEASON_END_MONTH + 1) : SEASON_START_MONTH;
-    if (y === joinYear && joinMonth > SEASON_END_MONTH) continue;
-
-    let endMonthExclusive;
-    if (y < today.getFullYear()) {
-      endMonthExclusive = SEASON_END_MONTH + 1;
-    } else {
-      const currentMonth = today.getMonth();
-      endMonthExclusive = currentMonth > SEASON_END_MONTH ? SEASON_END_MONTH + 1 : currentMonth + 1;
-    }
-
-    for (let m = startMonth; m < endMonthExclusive; m++) {
-      const monthStart = new Date(y, m, 1);
-      const monthEnd = new Date(y, m + 1, 1);
-      if (monthHasActiveOverlap(segments, monthStart, monthEnd)) count++;
-    }
-  }
-  return count;
-}
-
-function playerFinance(player, tiers) {
-  const tier = (tiers || []).find((t) => t.id === player.tierId);
-  const fee = tier ? Number(tier.monthlyFee) || 0 : 0;
-  const monthsDue = totalSeasonMonthsDue(player.joinDate, player.statusLog);
-  const due = monthsDue * fee;
-  const paid = (player.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const balance = due - paid;
-  return { due, paid, balance, fee, tierName: tier ? tier.name : "" };
-}
-
-function complianceStatus(player, tiers) {
-  if (!player.active) return "inactive";
-  const { balance, fee } = playerFinance(player, tiers);
-  if (!player.documentsComplete) return "red";
-  if (!player.tierId) return "amber";
-  if (balance <= 0) return "green";
-  if (fee > 0 && balance <= fee) return "amber";
-  if (balance > 0) return "red";
-  return "green";
-}
-
-const STATUS_LABEL = { green: "Compliant", amber: "Payment due", red: "Non-compliant", inactive: "Inactive" };
 const STATUS_COLOR = { green: T.green, amber: T.amber, red: T.danger, inactive: T.inkSoft };
-
 
 function Badge({ status }) {
   const cls = status === "green" ? "gfc-badge-green" : status === "amber" ? "gfc-badge-amber" : status === "red" ? "gfc-badge-red" : "gfc-badge-neutral";
