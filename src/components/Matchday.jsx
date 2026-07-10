@@ -1,0 +1,323 @@
+import React, { useState, useMemo } from "react";
+import { T } from "../theme.js";
+import { fmtDate, todayISO } from "../lib/format.js";
+import { printTeamSheet } from "../lib/teamSheet.js";
+
+export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey }) {
+  const activeMatch = matches.find((m) => m.id === activeMatchId) || null;
+  const [rosterAgeFilter, setRosterAgeFilter] = useState("All");
+
+  const rosterPool = useMemo(() => {
+    return enriched.filter((p) => rosterAgeFilter === "All" || p.ageGroup === rosterAgeFilter);
+  }, [enriched, rosterAgeFilter]);
+
+  const takenPlayerIds = new Set(squad.map((r) => r.playerId));
+
+  function slotRow(slotNo, role) {
+    const row = squad.find((r) => r.slotNo === slotNo);
+    return (
+      <div key={slotNo} className="gfc-send-row" style={{ gap: 8 }}>
+        <div style={{ width: 22, fontWeight: 700, color: T.inkSoft }}>{slotNo}</div>
+        <select
+          className="gfc-select"
+          style={{ flex: 1 }}
+          value={row?.playerId || ""}
+          onChange={(e) => {
+            const player = enriched.find((p) => p.id === e.target.value) || null;
+            onSetSlot(activeMatch.id, slotNo, role, player);
+          }}
+        >
+          <option value="">— empty —</option>
+          {rosterPool
+            .filter((p) => p.id === row?.playerId || !takenPlayerIds.has(p.id))
+            .map((p) => (
+              <option key={p.id} value={p.id}>{p.name}{p.regNo ? "" : " (no reg no)"}</option>
+            ))}
+        </select>
+        <input
+          className="gfc-input"
+          style={{ width: 60, textAlign: "center" }}
+          placeholder="No."
+          value={row?.jerseyNo || ""}
+          disabled={!row}
+          onChange={(e) => row && onUpdateJersey(activeMatch.id, row.id, e.target.value)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="gfc-topbar">
+        <div>
+          <div className="gfc-page-title gfc-display">Matchday</div>
+          <div className="gfc-page-sub">Build your squad and print the official team sheet</div>
+        </div>
+        <button className="gfc-btn gfc-btn-primary" onClick={onAddMatch}>+ New fixture</button>
+      </div>
+
+      <div className="gfc-row2" style={{ alignItems: "flex-start", gridTemplateColumns: "260px 1fr" }}>
+        <div className="gfc-panel" style={{ padding: 0 }}>
+          <div className="gfc-panel-head"><div className="gfc-panel-title">Fixtures</div></div>
+          {matches.length === 0 ? (
+            <div className="gfc-empty">No fixtures yet. Add one to get started.</div>
+          ) : (
+            <div>
+              {matches.map((m) => (
+                <div
+                  key={m.id}
+                  onClick={() => setActiveMatchId(m.id)}
+                  style={{
+                    padding: "10px 14px",
+                    borderBottom: `1px solid ${T.line}`,
+                    cursor: "pointer",
+                    background: activeMatchId === m.id ? T.paperDim : "transparent",
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>vs {m.opponent || "TBC"}</div>
+                  <div style={{ fontSize: 11.5, color: T.inkSoft }}>{fmtDate(m.matchDate)} · {m.homeAway === "H" ? "Home" : "Away"}</div>
+                  {m.ageGroup && <span className="gfc-agepill" style={{ marginTop: 4, display: "inline-block" }}>{m.ageGroup}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {!activeMatch ? (
+          <div className="gfc-panel">
+            <div className="gfc-empty">
+              <div className="gfc-empty-title gfc-display">No fixture selected</div>
+              Choose a fixture on the left, or create a new one, to build a squad.
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="gfc-panel" style={{ marginBottom: 14 }}>
+              <div className="gfc-panel-head">
+                <div>
+                  <div className="gfc-panel-title">{activeMatch.homeAway === "H" ? "Garlandale FC (H)" : `${activeMatch.opponent || "Opponent"} (H)`} vs {activeMatch.homeAway === "H" ? (activeMatch.opponent || "Opponent") : "Garlandale FC"} (A)</div>
+                  <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 2 }}>
+                    {fmtDate(activeMatch.matchDate)} {activeMatch.kickoffTime ? `· ${activeMatch.kickoffTime}` : ""} · {activeMatch.division || "Division TBC"} · {activeMatch.competition || "Competition TBC"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={() => onEditMatch(activeMatch)}>Edit fixture</button>
+                  <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={() => printTeamSheet(activeMatch, squad, enriched)}>Print team sheet</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="gfc-row2">
+              <div className="gfc-panel" style={{ padding: 16 }}>
+                <div className="gfc-panel-title" style={{ marginBottom: 10 }}>Starting XI</div>
+                <div className="gfc-filters" style={{ marginBottom: 10 }}>
+                  <select className="gfc-select" style={{ maxWidth: 160 }} value={rosterAgeFilter} onChange={(e) => setRosterAgeFilter(e.target.value)}>
+                    {ageGroups.map((g) => <option key={g} value={g}>{g === "All" ? "All age groups" : g}</option>)}
+                  </select>
+                </div>
+                <div className="gfc-checklist" style={{ maxHeight: "none" }}>
+                  {Array.from({ length: 11 }, (_, i) => slotRow(i + 1, "starting"))}
+                </div>
+              </div>
+              <div className="gfc-panel" style={{ padding: 16 }}>
+                <div className="gfc-panel-title" style={{ marginBottom: 10 }}>Substitutes</div>
+                <div style={{ height: 38 }} />
+                <div className="gfc-checklist" style={{ maxHeight: "none" }}>
+                  {Array.from({ length: 9 }, (_, i) => slotRow(i + 12, "sub"))}
+                </div>
+              </div>
+            </div>
+
+            {squad.some((r) => r.player && !r.player.regNo) && (
+              <div style={{ background: T.amberSoft, border: `1px solid ${T.gold}`, borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#7a5410", marginTop: 14 }}>
+                <strong>Heads up:</strong> at least one selected player doesn't have a federation registration number on file yet — worth confirming eligibility before matchday.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+export function MatchModal({ match, players, ageGroups, onClose, onSave, onDelete }) {
+  const [form, setForm] = useState(() => ({
+    id: match?.id || "",
+    leagueName: match?.leagueName || "Cape Town Tygerberg LFA",
+    homeTeam: match?.homeTeam || "Garlandale FC",
+    opponent: match?.opponent || "",
+    homeAway: match?.homeAway || "H",
+    venue: match?.venue || "",
+    matchDate: match?.matchDate || todayISO(),
+    kickoffTime: match?.kickoffTime || "",
+    division: match?.division || "",
+    competition: match?.competition || "",
+    ageGroup: match?.ageGroup || "",
+    cornerFlags: match?.cornerFlags || "",
+    fieldConditions: match?.fieldConditions || "",
+    fieldMarking: match?.fieldMarking || "",
+    firstAidPresent: match?.firstAidPresent || "",
+    refereeName: match?.refereeName || "",
+    assistantRef1: match?.assistantRef1 || "",
+    assistantRef2: match?.assistantRef2 || "",
+    coachName: match?.coachName || "",
+    coachRegNo: match?.coachRegNo || "",
+    managerName: match?.managerName || "",
+    managerRegNo: match?.managerRegNo || "",
+    captainPlayerId: match?.captainPlayerId || "",
+    physioName: match?.physioName || "",
+    physioRegNo: match?.physioRegNo || "",
+    comments: match?.comments || "",
+  }));
+
+  function update(field, value) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.opponent.trim()) return;
+    onSave(form);
+  }
+
+  return (
+    <div className="gfc-modal-backdrop" onClick={onClose}>
+      <div className="gfc-modal" style={{ maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
+        <div className="gfc-modal-head">
+          <div className="gfc-modal-title gfc-display">{match ? "Edit fixture" : "New fixture"}</div>
+          <button className="gfc-modal-close" onClick={onClose}>×</button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Opponent</label>
+              <input className="gfc-input" value={form.opponent} onChange={(e) => update("opponent", e.target.value)} required />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Home / Away</label>
+              <select className="gfc-select" value={form.homeAway} onChange={(e) => update("homeAway", e.target.value)}>
+                <option value="H">Home</option>
+                <option value="A">Away</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Date</label>
+              <input type="date" className="gfc-input" value={form.matchDate} onChange={(e) => update("matchDate", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Kick-off time</label>
+              <input type="time" className="gfc-input" value={form.kickoffTime} onChange={(e) => update("kickoffTime", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Venue &amp; field</label>
+              <input className="gfc-input" value={form.venue} onChange={(e) => update("venue", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Age group</label>
+              <select className="gfc-select" value={form.ageGroup} onChange={(e) => update("ageGroup", e.target.value)}>
+                <option value="">Not set</option>
+                {ageGroups.filter((g) => g !== "All").map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Division</label>
+              <input className="gfc-input" value={form.division} onChange={(e) => update("division", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Competition</label>
+              <input className="gfc-input" value={form.competition} onChange={(e) => update("competition", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Referee</label>
+              <input className="gfc-input" value={form.refereeName} onChange={(e) => update("refereeName", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">League / association name</label>
+              <input className="gfc-input" value={form.leagueName} onChange={(e) => update("leagueName", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Coach name</label>
+              <input className="gfc-input" value={form.coachName} onChange={(e) => update("coachName", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Coach reg. no</label>
+              <input className="gfc-input" value={form.coachRegNo} onChange={(e) => update("coachRegNo", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Manager name</label>
+              <input className="gfc-input" value={form.managerName} onChange={(e) => update("managerName", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Manager reg. no</label>
+              <input className="gfc-input" value={form.managerRegNo} onChange={(e) => update("managerRegNo", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Physio / first aider</label>
+              <input className="gfc-input" value={form.physioName} onChange={(e) => update("physioName", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Physio reg. no</label>
+              <input className="gfc-input" value={form.physioRegNo} onChange={(e) => update("physioRegNo", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="gfc-field">
+            <label className="gfc-label">Captain</label>
+            <select className="gfc-select" value={form.captainPlayerId} onChange={(e) => update("captainPlayerId", e.target.value)}>
+              <option value="">Not set</option>
+              {players.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Corner flags (Yes/No)</label>
+              <input className="gfc-input" value={form.cornerFlags} onChange={(e) => update("cornerFlags", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">First aid present (Yes/No)</label>
+              <input className="gfc-input" value={form.firstAidPresent} onChange={(e) => update("firstAidPresent", e.target.value)} />
+            </div>
+          </div>
+
+          <div className="gfc-field">
+            <label className="gfc-label">Comments</label>
+            <textarea className="gfc-textarea" rows={2} value={form.comments} onChange={(e) => update("comments", e.target.value)} />
+          </div>
+
+          <div className="gfc-modal-actions">
+            {match && (
+              <button type="button" className="gfc-btn gfc-btn-danger" style={{ marginRight: "auto" }} onClick={() => onDelete(match.id)}>
+                Delete fixture
+              </button>
+            )}
+            <button type="button" className="gfc-btn gfc-btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="gfc-btn gfc-btn-primary">Save fixture</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
