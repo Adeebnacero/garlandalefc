@@ -14,7 +14,7 @@ import {
   toDbItem,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
-import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus } from "./lib/billing.js";
+import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
 import { todayISO, fmtMoney, fmtDate, digitsOnly } from "./lib/format.js";
 import { waLink, smsLink, fillTemplate, TEMPLATES } from "./lib/messaging.js";
 import { extractFunctionErrorMessage } from "./lib/errors.js";
@@ -43,7 +43,7 @@ function MainApp({ role, onLogout }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [tab, setTab] = useState(role === "coach" ? "squad" : "dashboard");
   const [ageFilter, setAgeFilter] = useState("All");
   const [includeInactive, setIncludeInactive] = useState(false);
@@ -111,7 +111,7 @@ function MainApp({ role, onLogout }) {
   }, []);
 
   async function saveClubSettings(form) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const { error } = await supabase
         .from("club_settings")
@@ -128,7 +128,7 @@ function MainApp({ role, onLogout }) {
       setClubSettings(form);
       return null;
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
       return e.message || "Could not save settings.";
     }
   }
@@ -247,7 +247,7 @@ function MainApp({ role, onLogout }) {
         })),
       }));
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }, []);
 
@@ -305,9 +305,10 @@ function MainApp({ role, onLogout }) {
     return players.map((p) => {
       const fin = playerFinance(p, tiers);
       const status = complianceStatus(p, tiers);
+      const reason = complianceReason(p, tiers);
       const ageGroup = p.ageGroupOverride || computeAgeGroup(p.dob);
       const over40 = isOver40(p.dob);
-      return { ...p, ...fin, status, ageGroup, over40 };
+      return { ...p, ...fin, status, reason, ageGroup, over40 };
     });
   }, [players, tiers]);
 
@@ -333,7 +334,7 @@ function MainApp({ role, onLogout }) {
   }, [visiblePlayers]);
 
   async function savePlayer(form) {
-    setSaveError(false);
+    setSaveError("");
     const payload = toDbPlayer(form);
     try {
       if (form.id) {
@@ -364,7 +365,7 @@ function MainApp({ role, onLogout }) {
       setEditingPlayer(null);
       return null;
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
       if ((e.message || "").toLowerCase().includes("reg_no")) {
         return "That federation number is already assigned to another player.";
       }
@@ -373,20 +374,20 @@ function MainApp({ role, onLogout }) {
   }
 
   async function deletePlayer(id) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const { error } = await supabase.from("players").delete().eq("id", id);
       if (error) throw error;
       setPlayers((prev) => prev.filter((p) => p.id !== id));
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
     setEditingPlayer(null);
     setLedgerPlayerId(null);
   }
 
   async function addPayment(playerId, payment) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const { data: inserted, error } = await supabase
         .from("payments")
@@ -402,12 +403,12 @@ function MainApp({ role, onLogout }) {
         )
       );
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
   async function removePayment(playerId, paymentId) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const { error } = await supabase.from("payments").delete().eq("id", paymentId);
       if (error) throw error;
@@ -417,14 +418,14 @@ function MainApp({ role, onLogout }) {
         )
       );
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
   /* ----- Matchday CRUD ----- */
 
   async function saveMatch(form) {
-    setSaveError(false);
+    setSaveError("");
     const payload = toDbMatch(form);
     try {
       if (form.id) {
@@ -440,25 +441,25 @@ function MainApp({ role, onLogout }) {
       }
       setEditingMatch(null);
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
   async function deleteMatch(id) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const { error } = await supabase.from("matches").delete().eq("id", id);
       if (error) throw error;
       setMatches((prev) => prev.filter((m) => m.id !== id));
       if (activeMatchId === id) setActiveMatchId(null);
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
     setEditingMatch(null);
   }
 
   async function setSquadSlot(matchId, slotNo, role, player) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const existing = (matchSquads[matchId] || []).find((r) => r.slotNo === slotNo);
       if (!player) {
@@ -484,12 +485,12 @@ function MainApp({ role, onLogout }) {
       }
       await loadMatchSquad(matchId);
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
   async function updateSquadJersey(matchId, rowId, jerseyNo) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const { error } = await supabase.from("match_squad").update({ jersey_no: jerseyNo }).eq("id", rowId);
       if (error) throw error;
@@ -498,14 +499,14 @@ function MainApp({ role, onLogout }) {
         [matchId]: (prev[matchId] || []).map((r) => (r.id === rowId ? { ...r, jerseyNo } : r)),
       }));
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
   /* ----- Tier CRUD ----- */
 
   async function saveTier(form) {
-    setSaveError(false);
+    setSaveError("");
     const payload = toDbTier(form);
     try {
       if (form.id) {
@@ -519,19 +520,19 @@ function MainApp({ role, onLogout }) {
       }
       setEditingTier(null);
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
   async function deleteTier(id) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const { error } = await supabase.from("tiers").delete().eq("id", id);
       if (error) throw error;
       setTiers((prev) => prev.filter((t) => t.id !== id));
       setPlayers((prev) => prev.map((p) => (p.tierId === id ? { ...p, tierId: "" } : p)));
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
     setEditingTier(null);
   }
@@ -539,7 +540,7 @@ function MainApp({ role, onLogout }) {
   /* ----- Kit CRUD ----- */
 
   async function saveItem(form) {
-    setSaveError(false);
+    setSaveError("");
     const payload = toDbItem(form);
     try {
       if (form.id) {
@@ -553,24 +554,24 @@ function MainApp({ role, onLogout }) {
       }
       setEditingItem(null);
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
   async function deleteItem(id) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const { error } = await supabase.from("inventory_items").delete().eq("id", id);
       if (error) throw error;
       setInventory((prev) => prev.filter((i) => i.id !== id));
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
     setEditingItem(null);
   }
 
   async function issueItem({ playerId, itemId, size, quantity, dateIssued, notes }) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const item = inventory.find((i) => i.id === itemId);
       const { data: inserted, error } = await supabase
@@ -586,12 +587,12 @@ function MainApp({ role, onLogout }) {
       if (updErr) throw updErr;
       await Promise.all([loadKit()]);
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
   async function returnItem(issuedId) {
-    setSaveError(false);
+    setSaveError("");
     try {
       const row = issuedItems.find((r) => r.id === issuedId);
       const { error } = await supabase.from("issued_items").update({ date_returned: todayISO() }).eq("id", issuedId);
@@ -604,7 +605,7 @@ function MainApp({ role, onLogout }) {
       }
       await loadKit();
     } catch (e) {
-      setSaveError(true);
+      setSaveError(e.message || "Something went wrong. Please try again.");
     }
   }
 
@@ -648,28 +649,13 @@ function MainApp({ role, onLogout }) {
   }
 
   async function applySnapshot(snapshot) {
-    // Children first, then parents, to respect foreign keys on delete;
-    // reverse order on insert (parents first, then children).
-    const del = (table) => supabase.from(table).delete().neq("id", "00000000-0000-0000-0000-000000000000");
-
-    await del("issued_items");
-    await del("match_squad");
-    await del("payments");
-    await del("player_status_log");
-    await del("matches");
-    await del("inventory_items");
-    await del("players");
-    await del("tiers");
-
-    if (snapshot.tiers?.length) await supabase.from("tiers").insert(snapshot.tiers);
-    if (snapshot.players?.length) await supabase.from("players").insert(snapshot.players);
-    if (snapshot.inventory_items?.length) await supabase.from("inventory_items").insert(snapshot.inventory_items);
-    if (snapshot.matches?.length) await supabase.from("matches").insert(snapshot.matches);
-    if (snapshot.payments?.length) await supabase.from("payments").insert(snapshot.payments);
-    if (snapshot.match_squad?.length) await supabase.from("match_squad").insert(snapshot.match_squad);
-    if (snapshot.issued_items?.length) await supabase.from("issued_items").insert(snapshot.issued_items);
-    if (snapshot.player_status_log?.length) await supabase.from("player_status_log").insert(snapshot.player_status_log);
-    if (snapshot.club_settings?.length) await supabase.from("club_settings").upsert(snapshot.club_settings);
+    // A single call to a Postgres function that runs the whole restore as
+    // one transaction - either all of it applies, or none of it does. See
+    // schema.sql's restore_from_snapshot() for why this replaced ~15
+    // sequential client-side delete/insert calls (that approach could leave
+    // the database partially restored if any single call failed midway).
+    const { error } = await supabase.rpc("restore_from_snapshot", { snapshot });
+    if (error) throw error;
   }
 
   async function restoreFromSnapshot(backupId) {
@@ -815,12 +801,27 @@ function MainApp({ role, onLogout }) {
           >
             Log out
           </button>
-          <div>{saveError ? "⚠ Last change didn't save — check connection" : "Connected to Supabase"}</div>
+          <div>{saveError ? `⚠ ${saveError}` : "Connected to Supabase"}</div>
         </div>
       </aside>
 
       {/* MAIN */}
       <main className="gfc-main">
+        {saveError && (
+          <div style={{
+            background: T.dangerSoft, border: `1px solid ${T.danger}`, borderRadius: 10,
+            padding: "10px 16px", marginBottom: 18, display: "flex", alignItems: "center",
+            justifyContent: "space-between", gap: 12, fontSize: 13, color: T.danger, fontWeight: 600,
+          }}>
+            <span>⚠ {saveError}</span>
+            <button
+              onClick={() => setSaveError("")}
+              style={{ background: "none", border: "none", color: T.danger, fontSize: 16, cursor: "pointer", lineHeight: 1, padding: 0 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {tab === "dashboard" && (
           <DashboardView
             stats={stats}
