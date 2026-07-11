@@ -136,7 +136,7 @@ export function DashboardView({ stats, enriched, includeInactive, setIncludeInac
                   <td style={{ fontWeight: 600 }}>{p.name}</td>
                   <td><span className="gfc-agepill">{p.ageGroup}</span></td>
                   <td className="gfc-mono" style={{ color: T.danger, fontWeight: 700 }}>{fmtMoney(p.balance)}</td>
-                  <td><Badge status={p.status} /></td>
+                  <td><Badge status={p.status} reason={p.reason} /></td>
                 </tr>
               ))}
             </tbody>

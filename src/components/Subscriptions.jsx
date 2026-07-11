@@ -74,7 +74,7 @@ export function SubscriptionsView({ enriched, tiers, includeInactive, setInclude
                   <td className="gfc-mono" style={{ fontWeight: 700, color: p.balance > 0 ? T.danger : T.green }}>
                     {fmtMoney(p.balance)}
                   </td>
-                  <td><Badge status={p.status} /></td>
+                  <td><Badge status={p.status} reason={p.reason} /></td>
                   <td><button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); onOpenLedger(p); }}>Ledger</button></td>
                 </tr>
               ))}

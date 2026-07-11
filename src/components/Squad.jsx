@@ -4,6 +4,17 @@ import { computeAgeGroup } from "../lib/billing.js";
 import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
 import { Badge, InactiveToggle } from "./shared.jsx";
 
+// For coaches, the badge shows a simplified compliance view (documents only,
+// no financial detail) - this keeps the hover tooltip consistent with that,
+// rather than leaking a balance figure the badge itself doesn't show.
+function badgeProps(p, hideFinancials) {
+  if (hideFinancials && p.status !== "inactive") {
+    const ok = p.documentsComplete;
+    return { status: ok ? "green" : "red", reason: ok ? "Registration documents complete." : "Registration documents are incomplete." };
+  }
+  return { status: p.status, reason: p.reason };
+}
+
 export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter, setStatusFilter, search, setSearch, includeInactive, setIncludeInactive, role, onAdd, onEdit, onOpenLedger }) {
   const hideFinancials = role === "coach";
   const [viewMode, setViewMode] = useState("cards"); // 'cards' or 'list'
@@ -113,7 +124,7 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
                 )}
               </div>
               <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Badge status={hideFinancials && p.status !== "inactive" ? (p.documentsComplete ? "green" : "red") : p.status} />
+                <Badge {...badgeProps(p, hideFinancials)} />
                 {!hideFinancials && (
                   <button
                     className="gfc-btn gfc-btn-ghost gfc-btn-sm"
@@ -155,7 +166,7 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
                   <td>{p.phone || "—"}</td>
                   {!hideFinancials && <td>{p.tierName || <span style={{ color: T.amber, fontWeight: 700 }}>No tier</span>}</td>}
                   {!hideFinancials && <td className="gfc-mono" style={{ fontWeight: 700, color: p.balance > 0 ? T.danger : T.green }}>{fmtMoney(p.balance)}</td>}
-                  <td><Badge status={hideFinancials && p.status !== "inactive" ? (p.documentsComplete ? "green" : "red") : p.status} /></td>
+                  <td><Badge {...badgeProps(p, hideFinancials)} /></td>
                   {!hideFinancials && (
                     <td>
                       <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); onOpenLedger(p); }}>Ledger</button>

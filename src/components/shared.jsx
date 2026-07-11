@@ -2,10 +2,10 @@ import React from "react";
 import { T } from "../theme.js";
 import { STATUS_LABEL } from "../lib/billing.js";
 
-export function Badge({ status }) {
+export function Badge({ status, reason }) {
   const cls = status === "green" ? "gfc-badge-green" : status === "amber" ? "gfc-badge-amber" : status === "red" ? "gfc-badge-red" : "gfc-badge-neutral";
   return (
-    <span className={`gfc-badge ${cls}`}>
+    <span className={`gfc-badge ${cls}`} title={reason || undefined} style={reason ? { cursor: "help" } : undefined}>
       <span className="gfc-dot" />
       {STATUS_LABEL[status] || "—"}
     </span>

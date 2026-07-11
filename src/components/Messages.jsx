@@ -67,7 +67,7 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
                   {p.name}
                   <span className="gfc-agepill">{p.ageGroup}</span>
                 </span>
-                <Badge status={p.status} />
+                <Badge status={p.status} reason={p.reason} />
               </label>
             ))}
           </div>
