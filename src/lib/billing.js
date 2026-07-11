@@ -107,25 +107,34 @@ export function monthHasActiveOverlap(segments, monthStart, monthEnd) {
 
 /**
  * Season runs January (0) through October (9). November/December accrue
- * nothing. A player's very first season is pro-rated from their join month;
- * every season after that bills the full Jan-Oct run. Balances are one
- * continuous running total across every season a player has been a member
- * (unpaid amounts carry forward rather than resetting each year). Any month
- * fully covered by an inactive period is skipped entirely - no fee accrues
- * while paused, no matter how many times a player pauses and returns.
+ * nothing. A player's very first billable season is pro-rated from their
+ * start month; every season after that bills the full Jan-Oct run.
+ * Balances are one continuous running total across every season a player
+ * has been billed (unpaid amounts carry forward rather than resetting each
+ * year). Any month fully covered by an inactive period is skipped entirely
+ * - no fee accrues while paused, no matter how many times a player pauses
+ * and returns.
+ *
+ * `billingStartDate` is optional and defaults to `joinDate` - this is what
+ * lets a long-standing member's real join date (e.g. 1996) stay an honest
+ * tenure record while billing only starts from whenever the club actually
+ * wants it to (e.g. when this system went live), instead of retroactively
+ * billing decades of "seasons" that predate any subscription system.
+ * Active/inactive history is still read from the true `joinDate` onward,
+ * in case a pause was ever logged before the billing start date.
  */
-export function totalSeasonMonthsDue(joinDate, statusLog, today = new Date()) {
-  const join = new Date(joinDate);
-  if (isNaN(join)) return 0;
+export function totalSeasonMonthsDue(joinDate, statusLog, today = new Date(), billingStartDate = null) {
+  const effectiveStart = new Date(billingStartDate || joinDate);
+  if (isNaN(effectiveStart)) return 0;
   const segments = buildActiveSegments(joinDate, statusLog);
-  const joinYear = join.getUTCFullYear();
-  const joinMonth = join.getUTCMonth();
-  if (joinMonth > SEASON_END_MONTH && today.getUTCFullYear() === joinYear) return 0;
+  const startYear = effectiveStart.getUTCFullYear();
+  const startMonth = effectiveStart.getUTCMonth();
+  if (startMonth > SEASON_END_MONTH && today.getUTCFullYear() === startYear) return 0;
 
   let count = 0;
-  for (let y = joinYear; y <= today.getUTCFullYear(); y++) {
-    const startMonth = y === joinYear ? Math.min(joinMonth, SEASON_END_MONTH + 1) : SEASON_START_MONTH;
-    if (y === joinYear && joinMonth > SEASON_END_MONTH) continue;
+  for (let y = startYear; y <= today.getUTCFullYear(); y++) {
+    const firstMonthOfYear = y === startYear ? Math.min(startMonth, SEASON_END_MONTH + 1) : SEASON_START_MONTH;
+    if (y === startYear && startMonth > SEASON_END_MONTH) continue;
 
     let endMonthExclusive;
     if (y < today.getUTCFullYear()) {
@@ -135,7 +144,7 @@ export function totalSeasonMonthsDue(joinDate, statusLog, today = new Date()) {
       endMonthExclusive = currentMonth > SEASON_END_MONTH ? SEASON_END_MONTH + 1 : currentMonth + 1;
     }
 
-    for (let m = startMonth; m < endMonthExclusive; m++) {
+    for (let m = firstMonthOfYear; m < endMonthExclusive; m++) {
       // UTC-anchored month boundaries - matches how join dates (parsed as
       // UTC-midnight from date-only strings) and status-log timestamps
       // (stored as UTC instants) actually represent time, so a status
@@ -152,7 +161,7 @@ export function totalSeasonMonthsDue(joinDate, statusLog, today = new Date()) {
 export function playerFinance(player, tiers, today = new Date()) {
   const tier = (tiers || []).find((t) => t.id === player.tierId);
   const fee = tier ? Number(tier.monthlyFee) || 0 : 0;
-  const monthsDue = totalSeasonMonthsDue(player.joinDate, player.statusLog, today);
+  const monthsDue = totalSeasonMonthsDue(player.joinDate, player.statusLog, today, player.billingStartDate);
   const due = monthsDue * fee;
   const paid = (player.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const balance = due - paid;

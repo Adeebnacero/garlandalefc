@@ -132,6 +132,21 @@ describe("totalSeasonMonthsDue - the core billing calculation", () => {
   it("returns 0 for an invalid join date", () => {
     expect(totalSeasonMonthsDue("not-a-date", [], TODAY)).toBe(0);
   });
+
+  it("uses billingStartDate instead of join date when provided - for long-standing members who joined before this billing system existed", () => {
+    // A player who joined in 1996 but should only be billed from 2024
+    // onward must be billed exactly as if they joined fresh in Jan 2024 -
+    // NOT for 30 years of backdated seasons.
+    const asIfJoinedJan2024 = totalSeasonMonthsDue("2024-01-01", [], TODAY);
+    const legacyMember = totalSeasonMonthsDue("1996-05-01", [], TODAY, "2024-01-01");
+    expect(legacyMember).toBe(asIfJoinedJan2024);
+  });
+
+  it("falls back to join date when billingStartDate is not set (default, unaffected behavior)", () => {
+    const withoutBillingStart = totalSeasonMonthsDue("2024-03-15", [], TODAY);
+    const withNullBillingStart = totalSeasonMonthsDue("2024-03-15", [], TODAY, null);
+    expect(withNullBillingStart).toBe(withoutBillingStart);
+  });
 });
 
 describe("playerFinance", () => {
@@ -157,6 +172,13 @@ describe("playerFinance", () => {
     expect(fin.due).toBe(0);
     expect(fin.fee).toBe(0);
     expect(fin.tierName).toBe("");
+  });
+
+  it("uses billingStartDate over the real join date when a player joined long before this billing system existed", () => {
+    const legacyPlayer = { ...basePlayer, joinDate: "1996-05-01", billingStartDate: "2024-03-15" };
+    const fin = playerFinance(legacyPlayer, tiers, TODAY);
+    const expectedMonths = 8 + 10 + 7; // same as if they'd joined fresh on 2024-03-15
+    expect(fin.due).toBe(expectedMonths * 50);
   });
 });
 
