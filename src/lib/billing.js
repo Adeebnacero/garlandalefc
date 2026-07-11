@@ -159,15 +159,47 @@ export function playerFinance(player, tiers, today = new Date()) {
   return { due, paid, balance, fee, tierName: tier ? tier.name : "" };
 }
 
-export function complianceStatus(player, tiers, today = new Date()) {
-  if (!player.active) return "inactive";
+/**
+ * Single source of truth for compliance status AND the human-readable
+ * reason behind it - kept together deliberately so the badge color and its
+ * tooltip explanation can never disagree with each other.
+ */
+function computeComplianceDetail(player, tiers, today = new Date()) {
+  if (!player.active) {
+    return { status: "inactive", reason: "Player is marked inactive." };
+  }
   const { balance, fee } = playerFinance(player, tiers, today);
-  if (!player.documentsComplete) return "red";
-  if (!player.tierId) return "amber";
-  if (balance <= 0) return "green";
-  if (fee > 0 && balance <= fee) return "amber";
-  if (balance > 0) return "red";
-  return "green";
+  if (!player.documentsComplete) {
+    return { status: "red", reason: "Registration documents are incomplete." };
+  }
+  if (!player.tierId) {
+    return { status: "amber", reason: "No subscription tier has been assigned yet." };
+  }
+  if (balance <= 0) {
+    return { status: "green", reason: "Fully paid up." };
+  }
+  if (fee > 0 && balance <= fee) {
+    return { status: "amber", reason: `Owes ${fmtMoneyLocal(balance)} — within one month's fee.` };
+  }
+  if (balance > 0) {
+    return { status: "red", reason: `Owes ${fmtMoneyLocal(balance)} — more than one month's fee.` };
+  }
+  return { status: "green", reason: "Fully paid up." };
+}
+
+// Tiny local copy of the money formatter - kept minimal here rather than
+// importing from lib/format.js, since billing.js is deliberately dependency-free.
+function fmtMoneyLocal(n) {
+  const v = Number(n) || 0;
+  return (v < 0 ? "-" : "") + "R" + Math.abs(v).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export function complianceStatus(player, tiers, today = new Date()) {
+  return computeComplianceDetail(player, tiers, today).status;
+}
+
+export function complianceReason(player, tiers, today = new Date()) {
+  return computeComplianceDetail(player, tiers, today).reason;
 }
 
 export const STATUS_LABEL = { green: "Compliant", amber: "Payment due", red: "Non-compliant", inactive: "Inactive" };
