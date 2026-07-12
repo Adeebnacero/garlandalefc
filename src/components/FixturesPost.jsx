@@ -98,6 +98,12 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
   const [contactName, setContactName] = useState("Yusuf Nacerodien");
   const [contactPhone, setContactPhone] = useState("083-556-4102");
 
+  const [tuckshopText, setTuckshopText] = useState("");
+  const tuckshopItems = useMemo(
+    () => tuckshopText.split(/[\n,]/).map((s) => s.trim()).filter(Boolean),
+    [tuckshopText]
+  );
+
   const divisionLabelMap = useMemo(() => {
     const map = {};
     (divisionLabels || []).forEach((d) => { map[d.divisionKey] = d.teamLabel; });
@@ -277,6 +283,18 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
             </div>
           </div>
 
+          <div className="gfc-panel-title" style={{ marginTop: 16, marginBottom: 10 }}>Tuckshop menu (poster only)</div>
+          <div className="gfc-field">
+            <label className="gfc-label">Items available <span style={{ fontWeight: 400, textTransform: "none", color: T.inkSoft }}>(comma or line separated, optional)</span></label>
+            <textarea
+              className="gfc-textarea"
+              rows={2}
+              placeholder="Chips, Chocolates, Cooldrinks, Boerewors rolls"
+              value={tuckshopText}
+              onChange={(e) => setTuckshopText(e.target.value)}
+            />
+          </div>
+
           <div className="gfc-panel-title" style={{ marginTop: 16, marginBottom: 10 }}>PDF footer (weekly sheet only)</div>
           <div className="gfc-field">
             <label className="gfc-label">Footer notice 1</label>
@@ -300,7 +318,7 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
 
         <PosterPreviewFrame>
           <div ref={posterRef}>
-            <FixturePoster groups={groups} dateRangeLabel={dateRangeLabel} handle={handle} hashtag={hashtag} />
+            <FixturePoster groups={groups} dateRangeLabel={dateRangeLabel} handle={handle} hashtag={hashtag} tuckshopItems={tuckshopItems} />
           </div>
         </PosterPreviewFrame>
       </div>
@@ -342,7 +360,7 @@ function PosterPreviewFrame({ children }) {
   );
 }
 
-function FixturePoster({ groups, dateRangeLabel, handle, hashtag }) {
+function FixturePoster({ groups, dateRangeLabel, handle, hashtag, tuckshopItems }) {
   return (
     <div
       style={{
@@ -421,6 +439,27 @@ function FixturePoster({ groups, dateRangeLabel, handle, hashtag }) {
             </table>
           </div>
         ))}
+
+        {tuckshopItems && tuckshopItems.length > 0 && (
+          <div style={{ borderRadius: 6, overflow: "hidden", border: "1px solid rgba(232,172,46,0.4)" }}>
+            <div style={{ background: T.green, color: "#fff", fontWeight: 800, fontSize: 19, padding: "10px 16px", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              🍟 Tuckshop Menu
+            </div>
+            <div style={{ background: "#161029", padding: "14px 16px", display: "flex", flexWrap: "wrap", gap: 10 }}>
+              {tuckshopItems.map((item, i) => (
+                <span
+                  key={i}
+                  style={{
+                    background: "#1c1738", color: "#fff", fontWeight: 700, fontSize: 14,
+                    padding: "6px 14px", borderRadius: 999, border: `1px solid ${T.gold}`,
+                  }}
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
