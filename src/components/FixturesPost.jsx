@@ -360,18 +360,18 @@ function FixturePoster({ groups, dateRangeLabel, handle, hashtag }) {
       <div style={{ position: "absolute", bottom: -140, right: -140, width: 460, height: 460, background: "radial-gradient(circle, rgba(30,122,65,0.28), transparent 70%)" }} />
 
       {/* LEFT: branding */}
-      <div style={{ width: 380, flexShrink: 0, position: "relative", zIndex: 1, display: "flex", flexDirection: "column" }}>
+      <div style={{ width: 380, flexShrink: 0, position: "relative", zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
         <div style={{ color: T.gold, fontFamily: "'Anton', sans-serif", fontSize: 26, letterSpacing: 2 }}>GARLANDALE FC</div>
         <div style={{ color: "#fff", fontFamily: "'Anton', sans-serif", fontSize: 84, lineHeight: 0.95, marginTop: 4, textTransform: "uppercase" }}>Fixtures</div>
-        <div style={{ display: "inline-block", marginTop: 18, background: T.green, color: "#fff", fontWeight: 800, fontSize: 20, padding: "8px 16px", borderRadius: 4, alignSelf: "flex-start" }}>
+        <div style={{ display: "inline-block", marginTop: 18, background: T.green, color: "#fff", fontWeight: 800, fontSize: 20, padding: "8px 16px", borderRadius: 4, alignSelf: "center" }}>
           {dateRangeLabel}
         </div>
 
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "flex-start", padding: "30px 0" }}>
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "30px 0" }}>
           <img src={BADGE_SRC} alt="Garlandale FC crest" style={{ width: 260, height: 260 }} />
         </div>
 
-        <div style={{ display: "flex", gap: 14, color: "#fff", fontSize: 13, fontWeight: 700, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 14, color: "#fff", fontSize: 13, fontWeight: 700, flexWrap: "wrap", justifyContent: "center" }}>
           <span>👥 TOGETHER</span>
           <span style={{ color: T.gold }}>|</span>
           <span>❤️ PASSION</span>

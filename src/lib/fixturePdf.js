@@ -67,15 +67,16 @@ export function generateFixturesPdf(groups, options = {}) {
   for (const group of (groups || [])) {
     ensureSpace(70 + group.rows.length * rowHeight);
 
-    // Underlined "Weekly Fixtures for {date}" heading, matching the real sheet.
-    doc.setFont("helvetica", "normal");
+    // Bold, centered "Weekly Fixtures for {date}" heading, matching the real sheet.
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(13);
     doc.setTextColor(0, 0, 0);
     const title = `Weekly Fixtures for ${group.headerRaw}`;
-    doc.text(title, margin, y);
     const titleWidth = doc.getTextWidth(title);
+    const titleX = margin + (tableWidth - titleWidth) / 2;
+    doc.text(title, titleX, y);
     doc.setDrawColor(0, 0, 0);
-    doc.line(margin, y + 2, margin + titleWidth, y + 2);
+    doc.line(titleX, y + 2, titleX + titleWidth, y + 2);
     y += 24;
 
     // Fully-bordered header row, matching the real sheet's plain black/white table.
