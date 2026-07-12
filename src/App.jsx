@@ -234,7 +234,10 @@ function MainApp({ role, onLogout }) {
         throw new Error(msg);
       }
       await loadPlayers();
-      return { success: true };
+      // The account can be successfully linked even if the invite email
+      // itself failed to send - surface both, so the UI never claims
+      // "invite sent" when it wasn't.
+      return { success: true, emailSent: !!data.emailSent, emailError: data.emailError || null };
     } catch (e) {
       return { error: e.message || "Failed to send app invite." };
     }

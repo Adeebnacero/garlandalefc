@@ -223,8 +223,10 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
     const result = await onInvitePlayer(player.id, inviteEmail.trim());
     if (result?.error) {
       setInviteMessage(result.error);
+    } else if (result.emailSent) {
+      setInviteMessage(`Invite email sent to ${inviteEmail.trim()}.`);
     } else {
-      setInviteMessage(`Invite sent to ${inviteEmail.trim()}.`);
+      setInviteMessage(`Account created, but the invite email couldn't be sent (${result.emailError || "unknown reason"}). Try resending, or check the SMTP setup in Settings.`);
     }
     setInviteBusy(false);
   }
@@ -373,31 +375,30 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
               <div style={{ fontSize: 12.5, fontWeight: 700, color: T.indigo, marginBottom: 8 }}>
                 App account
               </div>
-              {player.hasAppAccount ? (
-                <div style={{ fontSize: 12.5, color: T.green, fontWeight: 600 }}>
-                  ✓ Linked — this player has claimed their own app account.
+              {player.hasAppAccount && (
+                <div style={{ fontSize: 12.5, color: T.green, fontWeight: 600, marginBottom: 10 }}>
+                  ✓ Account created — an invite email has been sent at least once. If they never received it, you can resend below.
                 </div>
-              ) : (
-                <>
-                  <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>
-                    Not yet linked. Send an invite so this player can create their own account for the app.
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input
-                      className="gfc-input"
-                      style={{ flex: 1 }}
-                      placeholder="player@email.com"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                    />
-                    <button type="button" className="gfc-btn gfc-btn-outline" onClick={handleInvite} disabled={inviteBusy}>
-                      {inviteBusy ? "Sending…" : "Send app invite"}
-                    </button>
-                  </div>
-                  {inviteMessage && (
-                    <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 6, fontWeight: 600 }}>{inviteMessage}</div>
-                  )}
-                </>
+              )}
+              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>
+                {player.hasAppAccount
+                  ? "Resend if they lost the email, it went to spam, or an earlier attempt failed to send."
+                  : "Send an invite so this player can create their own account for the app."}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  className="gfc-input"
+                  style={{ flex: 1 }}
+                  placeholder="player@email.com"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                />
+                <button type="button" className="gfc-btn gfc-btn-outline" onClick={handleInvite} disabled={inviteBusy}>
+                  {inviteBusy ? "Sending…" : player.hasAppAccount ? "Resend invite" : "Send app invite"}
+                </button>
+              </div>
+              {inviteMessage && (
+                <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 6, fontWeight: 600 }}>{inviteMessage}</div>
               )}
             </div>
           )}
