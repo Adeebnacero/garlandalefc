@@ -12,6 +12,8 @@ import {
   toDbMatch,
   fromDbItem,
   toDbItem,
+  fromDbAsset,
+  toDbAsset,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
 import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
@@ -27,6 +29,7 @@ import { SubscriptionsView, LedgerModal, TierManagerModal, TierModal } from "./c
 import { MessagesView } from "./components/Messages.jsx";
 import { MatchdayView, MatchModal } from "./components/Matchday.jsx";
 import { KitView, ItemModal } from "./components/Kit.jsx";
+import { AssetsView, AssetModal } from "./components/Assets.jsx";
 import { BackupsView } from "./components/Backups.jsx";
 import { FixturesPostView } from "./components/FixturesPost.jsx";
 import { SettingsView } from "./components/Settings.jsx";
@@ -45,6 +48,7 @@ const CLUB_OPS_NAV = [
   { id: "subscriptions", label: "Subscriptions", icon: "$", roles: ["admin", "treasurer"] },
   { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
   { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
+  { id: "assets", label: "Club Assets", icon: "📦", roles: ["admin", "coach"] },
   { id: "messages", label: "Messages", icon: "✉", roles: ["admin", "treasurer"] },
 ];
 
@@ -80,6 +84,9 @@ function MainApp({ role, onLogout }) {
   const [inventory, setInventory] = useState([]);
   const [issuedItems, setIssuedItems] = useState([]);
   const [editingItem, setEditingItem] = useState(null); // inventory item or "new" or null
+
+  const [assets, setAssets] = useState([]);
+  const [editingAsset, setEditingAsset] = useState(null); // club asset or "new" or null
 
   const [tiers, setTiers] = useState([]);
   const [editingTier, setEditingTier] = useState(null); // tier object or "new" or null
@@ -324,6 +331,16 @@ function MainApp({ role, onLogout }) {
     }
   }, []);
 
+  const loadAssets = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("club_assets").select("*").order("name");
+      if (error) throw error;
+      setAssets((rows || []).map(fromDbAsset));
+    } catch (e) {
+      setLoadError((prev) => prev || e.message || "Could not load club assets.");
+    }
+  }, []);
+
   useEffect(() => {
     loadPlayers();
     loadMatches();
@@ -333,7 +350,8 @@ function MainApp({ role, onLogout }) {
     loadClubSettings();
     loadStaffList();
     loadDivisionLabels();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels]);
+    loadAssets();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -612,6 +630,37 @@ function MainApp({ role, onLogout }) {
       setSaveError(e.message || "Something went wrong. Please try again.");
     }
     setEditingItem(null);
+  }
+
+  async function saveAsset(form) {
+    setSaveError("");
+    const payload = toDbAsset(form);
+    try {
+      if (form.id) {
+        const { error } = await supabase.from("club_assets").update(payload).eq("id", form.id);
+        if (error) throw error;
+        setAssets((prev) => prev.map((a) => (a.id === form.id ? { ...a, ...form, quantity: Number(form.quantity), unitValue: Number(form.unitValue), lowStockThreshold: Number(form.lowStockThreshold) } : a)));
+      } else {
+        const { data: inserted, error } = await supabase.from("club_assets").insert(payload).select().single();
+        if (error) throw error;
+        setAssets((prev) => [...prev, fromDbAsset(inserted)]);
+      }
+      setEditingAsset(null);
+    } catch (e) {
+      setSaveError(e.message || "Something went wrong. Please try again.");
+    }
+  }
+
+  async function deleteAsset(id) {
+    setSaveError("");
+    try {
+      const { error } = await supabase.from("club_assets").delete().eq("id", id);
+      if (error) throw error;
+      setAssets((prev) => prev.filter((a) => a.id !== id));
+    } catch (e) {
+      setSaveError(e.message || "Something went wrong. Please try again.");
+    }
+    setEditingAsset(null);
   }
 
   async function issueItem({ playerId, itemId, size, quantity, dateIssued, notes }) {
@@ -951,6 +1000,14 @@ function MainApp({ role, onLogout }) {
           />
         )}
 
+        {tab === "assets" && (
+          <AssetsView
+            assets={assets}
+            onAdd={() => setEditingAsset("new")}
+            onEdit={(a) => setEditingAsset(a)}
+          />
+        )}
+
         {tab === "backups" && (
           <BackupsView
             backups={backupsList}
@@ -1059,6 +1116,15 @@ function MainApp({ role, onLogout }) {
           onClose={() => setEditingItem(null)}
           onSave={saveItem}
           onDelete={deleteItem}
+        />
+      )}
+
+      {editingAsset && (
+        <AssetModal
+          asset={editingAsset === "new" ? null : editingAsset}
+          onClose={() => setEditingAsset(null)}
+          onSave={saveAsset}
+          onDelete={deleteAsset}
         />
       )}
     </div>

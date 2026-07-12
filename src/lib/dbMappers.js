@@ -155,3 +155,26 @@ export function toDbItem(form) {
     quantity_on_hand: Number(form.quantityOnHand) || 0,
   };
 }
+
+export function fromDbAsset(row) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    category: row.category || "Other",
+    quantity: row.quantity ?? 0,
+    unitValue: Number(row.unit_value) || 0,
+    lowStockThreshold: row.low_stock_threshold ?? 0,
+    notes: row.notes || "",
+  };
+}
+
+export function toDbAsset(form) {
+  return {
+    name: form.name || "",
+    category: form.category || "Other",
+    quantity: Number(form.quantity) || 0,
+    unit_value: Number(form.unitValue) || 0,
+    low_stock_threshold: Number(form.lowStockThreshold) || 0,
+    notes: form.notes || "",
+  };
+}
