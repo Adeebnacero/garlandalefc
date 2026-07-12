@@ -188,7 +188,7 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
 
 /* ---------- PLAYER MODAL (add/edit) ---------- */
 
-export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers }) {
+export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers, onInvitePlayer }) {
   const [form, setForm] = useState(() => ({
     id: player?.id || "",
     name: player?.name || "",
@@ -208,6 +208,26 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
     active: player?.active ?? true,
   }));
   const [regNoError, setRegNoError] = useState("");
+
+  const [inviteEmail, setInviteEmail] = useState(player?.email || "");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState("");
+
+  async function handleInvite() {
+    if (!inviteEmail.trim()) {
+      setInviteMessage("Enter an email address first.");
+      return;
+    }
+    setInviteBusy(true);
+    setInviteMessage("");
+    const result = await onInvitePlayer(player.id, inviteEmail.trim());
+    if (result?.error) {
+      setInviteMessage(result.error);
+    } else {
+      setInviteMessage(`Invite sent to ${inviteEmail.trim()}.`);
+    }
+    setInviteBusy(false);
+  }
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -347,6 +367,40 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
           <div style={{ fontSize: 11.5, color: T.inkSoft }}>
             Will appear under <span className="gfc-agepill" style={{ marginLeft: 4 }}>{previewAgeGroup}</span>
           </div>
+
+          {player && (
+            <div style={{ marginTop: 16, background: T.paperDim, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.indigo, marginBottom: 8 }}>
+                App account
+              </div>
+              {player.hasAppAccount ? (
+                <div style={{ fontSize: 12.5, color: T.green, fontWeight: 600 }}>
+                  ✓ Linked — this player has claimed their own app account.
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>
+                    Not yet linked. Send an invite so this player can create their own account for the app.
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      className="gfc-input"
+                      style={{ flex: 1 }}
+                      placeholder="player@email.com"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                    />
+                    <button type="button" className="gfc-btn gfc-btn-outline" onClick={handleInvite} disabled={inviteBusy}>
+                      {inviteBusy ? "Sending…" : "Send app invite"}
+                    </button>
+                  </div>
+                  {inviteMessage && (
+                    <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 6, fontWeight: 600 }}>{inviteMessage}</div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           <div className="gfc-modal-actions">
             {player && (

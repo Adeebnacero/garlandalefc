@@ -220,6 +220,26 @@ function MainApp({ role, onLogout }) {
     }
   }
 
+  // Invites a SPECIFIC player to claim their own account (groundwork for
+  // the future player-facing app - see invite-player Edge Function).
+  // Returns {success:true} or {error:message} rather than managing global
+  // state, since this is triggered from inside PlayerModal, not a tab.
+  async function invitePlayer(playerId, email) {
+    try {
+      const { data, error } = await supabase.functions.invoke("invite-player", {
+        body: { playerId, email, redirectTo: window.location.origin },
+      });
+      if (error || data?.error) {
+        const msg = await extractFunctionErrorMessage(error, data);
+        throw new Error(msg);
+      }
+      await loadPlayers();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Failed to send app invite." };
+    }
+  }
+
   async function removeStaffMember(staffId) {
     const confirmed = window.confirm("Remove this person's access to the app? Their login will still exist, but they won't be able to see or change anything until re-invited.");
     if (!confirmed) return;
@@ -1125,6 +1145,7 @@ function MainApp({ role, onLogout }) {
           onSave={savePlayer}
           onDelete={deletePlayer}
           onManageTiers={() => setManagingTiers(true)}
+          onInvitePlayer={invitePlayer}
         />
       )}
 

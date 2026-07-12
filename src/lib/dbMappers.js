@@ -24,6 +24,7 @@ export function fromDbPlayer(row) {
     squadNumber: row.squad_number === null || row.squad_number === undefined ? "" : row.squad_number,
     tierId: row.tier_id || "",
     active: row.active === false ? false : true,
+    hasAppAccount: !!row.user_id,
     statusLog: (row.player_status_log || []).map((s) => ({ id: s.id, status: s.status, changedAt: s.changed_at })),
     payments: (row.payments || [])
       .map((p) => ({ id: p.id, amount: Number(p.amount), date: p.date, method: p.method }))
