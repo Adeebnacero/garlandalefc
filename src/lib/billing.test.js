@@ -10,6 +10,7 @@ import {
   totalSeasonMonthsDue,
   playerFinance,
   complianceStatus,
+  yearsOfService,
 } from "./billing.js";
 
 // A fixed "today" so every test is deterministic regardless of what
@@ -62,6 +63,30 @@ describe("computeExactAge / isOver40", () => {
 
   it("isOver40 is true on someone's exact 40th birthday", () => {
     expect(isOver40("1986-07-10", TODAY)).toBe(true);
+  });
+});
+
+describe("yearsOfService", () => {
+  it("formats whole years and months together", () => {
+    expect(yearsOfService("2023-03-05", TODAY)).toBe("3 years, 4 months");
+  });
+
+  it("omits the months part when it's exactly whole years", () => {
+    expect(yearsOfService("2023-07-10", TODAY)).toBe("3 years");
+  });
+
+  it("uses singular 'year' and 'month' correctly", () => {
+    expect(yearsOfService("2025-07-10", TODAY)).toBe("1 year");
+    expect(yearsOfService("2026-06-01", TODAY)).toBe("1 month");
+    expect(yearsOfService("2025-06-05", TODAY)).toBe("1 year, 1 month");
+  });
+
+  it("returns a friendly message for less than a month of service", () => {
+    expect(yearsOfService("2026-06-20", TODAY)).toBe("Less than a month");
+  });
+
+  it("returns an empty string for an invalid join date", () => {
+    expect(yearsOfService("not-a-date", TODAY)).toBe("");
   });
 });
 

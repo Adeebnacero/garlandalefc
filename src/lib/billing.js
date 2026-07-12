@@ -53,6 +53,27 @@ export function isOver40(dob, today = new Date()) {
   return age !== null && age >= 40;
 }
 
+/**
+ * Formats how long someone has been a member as "X years, Y months" (used
+ * for the tenure/service indicator on a player's profile - not related to
+ * billing, which is why this lives separately from the season math below).
+ */
+export function yearsOfService(joinDate, today = new Date()) {
+  const join = new Date(joinDate);
+  if (isNaN(join)) return "";
+  let totalMonths = (today.getUTCFullYear() - join.getUTCFullYear()) * 12 + (today.getUTCMonth() - join.getUTCMonth());
+  if (today.getUTCDate() < join.getUTCDate()) totalMonths -= 1;
+  if (totalMonths < 0) return "Not yet started";
+
+  const years = Math.floor(totalMonths / 12);
+  const months = totalMonths % 12;
+
+  if (years === 0 && months === 0) return "Less than a month";
+  const yearPart = years > 0 ? `${years} year${years === 1 ? "" : "s"}` : "";
+  const monthPart = months > 0 ? `${months} month${months === 1 ? "" : "s"}` : "";
+  return [yearPart, monthPart].filter(Boolean).join(", ");
+}
+
 /** Sort key used to order age groups sensibly: U7, U8, ... Seniors, Unassigned last. */
 export function ageGroupSortKey(g) {
   if (g === "Unassigned") return [3, 0];

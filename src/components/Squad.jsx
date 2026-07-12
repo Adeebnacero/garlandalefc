@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { T, STATUS_COLOR } from "../theme.js";
-import { computeAgeGroup } from "../lib/billing.js";
+import { computeAgeGroup, yearsOfService } from "../lib/billing.js";
 import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
 import { Badge, InactiveToggle } from "./shared.jsx";
 
@@ -289,14 +289,14 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
             <div className="gfc-field">
               <label className="gfc-label">Club join date <span style={{ fontWeight: 400, textTransform: "none", color: T.inkSoft }}>(tenure/service record)</span></label>
               <input type="date" className="gfc-input" value={form.joinDate} onChange={(e) => update("joinDate", e.target.value)} />
+              {form.joinDate && (
+                <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 4 }}>{yearsOfService(form.joinDate)} of service</div>
+              )}
             </div>
             <div className="gfc-field">
               <label className="gfc-label">Billing start date <span style={{ fontWeight: 400, textTransform: "none", color: T.inkSoft }}>(optional)</span></label>
               <input type="date" className="gfc-input" placeholder="Same as join date" value={form.billingStartDate} onChange={(e) => update("billingStartDate", e.target.value)} />
             </div>
-          </div>
-          <div style={{ fontSize: 11, color: T.inkSoft, marginTop: -8, marginBottom: 14 }}>
-            Subscription billing normally starts from the join date above. Only set a separate billing start date for a long-standing member whose real join date predates this system — e.g. someone who's been at the club since 1996 but should only be billed from when the club started using this app.
           </div>
 
           <div className="gfc-row2">

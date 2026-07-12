@@ -39,12 +39,29 @@ import { LoginView, AcceptInviteView, NoAccessView } from "./components/Auth.jsx
 
 const CLUB_NAME = "Garlandale FC";
 
+const CLUB_OPS_NAV = [
+  { id: "dashboard", label: "Dashboard", icon: "◆", roles: ["admin", "treasurer"] },
+  { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
+  { id: "subscriptions", label: "Subscriptions", icon: "$", roles: ["admin", "treasurer"] },
+  { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
+  { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
+  { id: "messages", label: "Messages", icon: "✉", roles: ["admin", "treasurer"] },
+];
+
+const ADMIN_NAV = [
+  { id: "fixtures-post", label: "Fixtures Post", icon: "🖼", roles: ["admin", "treasurer"] },
+  { id: "backups", label: "Backups", icon: "⟳", roles: ["admin"] },
+  { id: "settings", label: "Settings", icon: "⚙", roles: ["admin", "treasurer"] },
+  { id: "users", label: "Users", icon: "👤", roles: ["admin"] },
+];
+
 function MainApp({ role, onLogout }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [tab, setTab] = useState(role === "coach" ? "squad" : "dashboard");
+  const [adminExpanded, setAdminExpanded] = useState(false);
   const [ageFilter, setAgeFilter] = useState("All");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [statusFilter, setStatusFilter] = useState("All");
@@ -771,18 +788,7 @@ function MainApp({ role, onLogout }) {
           <div className="gfc-club-sub">Club Management</div>
         </div>
         <nav className="gfc-nav">
-          {[
-            { id: "dashboard", label: "Dashboard", icon: "◆", roles: ["admin", "treasurer"] },
-            { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
-            { id: "subscriptions", label: "Subscriptions", icon: "$", roles: ["admin", "treasurer"] },
-            { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
-            { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
-            { id: "backups", label: "Backups", icon: "⟳", roles: ["admin"] },
-            { id: "fixtures-post", label: "Fixtures Post", icon: "🖼", roles: ["admin", "treasurer"] },
-            { id: "settings", label: "Settings", icon: "⚙", roles: ["admin", "treasurer"] },
-            { id: "messages", label: "Messages", icon: "✉", roles: ["admin", "treasurer"] },
-            { id: "users", label: "Users", icon: "👤", roles: ["admin"] },
-          ].filter((n) => n.roles.includes(role)).map((n) => (
+          {CLUB_OPS_NAV.filter((n) => n.roles.includes(role)).map((n) => (
             <button
               key={n.id}
               className={`gfc-nav-item ${tab === n.id ? "active" : ""}`}
@@ -792,6 +798,35 @@ function MainApp({ role, onLogout }) {
               {n.label}
             </button>
           ))}
+
+          {(() => {
+            const visibleAdminItems = ADMIN_NAV.filter((n) => n.roles.includes(role));
+            if (visibleAdminItems.length === 0) return null;
+            const isAdminExpanded = adminExpanded || visibleAdminItems.some((n) => n.id === tab);
+            return (
+              <>
+                <button
+                  className="gfc-nav-item"
+                  onClick={() => setAdminExpanded((v) => !v)}
+                  style={{ marginTop: 10, opacity: 0.75 }}
+                >
+                  <span className="gfc-nav-icon">{isAdminExpanded ? "▾" : "▸"}</span>
+                  Admin
+                </button>
+                {isAdminExpanded && visibleAdminItems.map((n) => (
+                  <button
+                    key={n.id}
+                    className={`gfc-nav-item ${tab === n.id ? "active" : ""}`}
+                    style={{ paddingLeft: 30 }}
+                    onClick={() => setTab(n.id)}
+                  >
+                    <span className="gfc-nav-icon">{n.icon}</span>
+                    {n.label}
+                  </button>
+                ))}
+              </>
+            );
+          })()}
         </nav>
         <div className="gfc-sidebar-foot">
           <div style={{ marginBottom: 8, textTransform: "capitalize" }}>{role} account</div>
