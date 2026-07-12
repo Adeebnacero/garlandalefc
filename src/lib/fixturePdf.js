@@ -1,20 +1,36 @@
 import jsPDF from "jspdf";
 import LETTERHEAD_SRC from "../assets/letterhead.jpg";
-import { groupFixturesByDate, fmtImportDateHeader } from "./fixtureImport.js";
 
 // ---------------------------------------------------------------------------
-// Produces a PDF matching the club's own weekly fixture sheet format:
-// letterhead, "Weekly Fixtures for {date}" heading per date, and a table of
-// Division/Team | Opponents | Time | Field (no referee column, per the
-// club's preference - that's filled in on the printed matchday sheet
-// instead, not this weekly overview).
+// Produces a PDF matching the club's own real weekly fixture sheet exactly:
+// same letterhead as the statement PDFs, underlined "Weekly Fixtures for
+// {date}" heading per date, a fully-bordered black/white table (Division,
+// Opponents, Time, Field - no referee column, per the club's preference),
+// and the standard footer notices + contact line.
+//
+// Takes the same `groups` shape the poster uses (parsed fresh from the
+// fixture text box at generate-time) - this is deliberate: whatever's
+// currently in the text box is what gets rendered, for both the poster
+// and this PDF, with no separate/stale data source.
 // ---------------------------------------------------------------------------
 
-export function generateFixturesPdf(fixtures, divisionLabelMap) {
+const DEFAULT_FOOTER_NOTICES = [
+  "PLEASE BRING YOUR SHINGUARDS!",
+  "PLEASE REPORT 1 HOUR BEFORE YOUR GAME!",
+];
+
+export function generateFixturesPdf(groups, options = {}) {
+  const {
+    footerNotices = DEFAULT_FOOTER_NOTICES,
+    contactName = "Yusuf Nacerodien",
+    contactPhone = "083-556-4102",
+  } = options;
+
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 48;
+  const rowHeight = 22;
 
   const letterheadAspect = 1600 / 277;
   const letterheadHeight = pageWidth / letterheadAspect;
@@ -27,66 +43,95 @@ export function generateFixturesPdf(fixtures, divisionLabelMap) {
     }
   }
 
-  const groups = groupFixturesByDate(fixtures);
+  drawLetterhead();
   let y = letterheadHeight + 40;
-  let firstPage = true;
 
-  for (const group of groups) {
-    // Rough estimate of how much vertical space this group needs; start a
-    // fresh page if it won't fit rather than splitting a table awkwardly.
-    const neededHeight = 70 + group.rows.length * 20;
-    if (!firstPage && y + neededHeight > pageHeight - margin) {
+  const colWidths = { division: 150, opponents: 155, time: 60, field: 0 };
+  const tableWidth = pageWidth - margin * 2;
+  colWidths.field = tableWidth - colWidths.division - colWidths.opponents - colWidths.time;
+  const colX = {
+    division: margin,
+    opponents: margin + colWidths.division,
+    time: margin + colWidths.division + colWidths.opponents,
+    field: margin + colWidths.division + colWidths.opponents + colWidths.time,
+  };
+
+  function ensureSpace(neededHeight) {
+    if (y + neededHeight > pageHeight - margin) {
       doc.addPage();
-      y = margin;
+      drawLetterhead();
+      y = letterheadHeight + 40;
     }
-    firstPage = false;
+  }
 
-    doc.setFont("helvetica", "bold");
+  for (const group of (groups || [])) {
+    ensureSpace(70 + group.rows.length * rowHeight);
+
+    // Underlined "Weekly Fixtures for {date}" heading, matching the real sheet.
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(13);
-    doc.setTextColor(36, 26, 69); // T.indigo
-    doc.text(`Weekly Fixtures for ${fmtImportDateHeader(group.date)}`, margin, y);
-    y += 20;
+    doc.setTextColor(0, 0, 0);
+    const title = `Weekly Fixtures for ${group.headerRaw}`;
+    doc.text(title, margin, y);
+    const titleWidth = doc.getTextWidth(title);
+    doc.setDrawColor(0, 0, 0);
+    doc.line(margin, y + 2, margin + titleWidth, y + 2);
+    y += 24;
 
-    const colX = { team: margin, opp: margin + 160, time: margin + 320, field: margin + 380 };
-    const tableWidth = pageWidth - margin * 2;
-
-    doc.setFillColor(239, 233, 218); // T.paperDim
-    doc.rect(margin, y, tableWidth, 20, "F");
+    // Fully-bordered header row, matching the real sheet's plain black/white table.
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(91, 84, 112);
-    doc.text("DIVISION / TEAM", colX.team + 6, y + 14);
-    doc.text("OPPONENTS", colX.opp + 6, y + 14);
-    doc.text("TIME", colX.time + 6, y + 14);
-    doc.text("FIELD", colX.field + 6, y + 14);
-    y += 20;
+    doc.setFontSize(10);
+    doc.setTextColor(0, 0, 0);
+    doc.setDrawColor(0, 0, 0);
+    doc.rect(colX.division, y, colWidths.division, rowHeight);
+    doc.rect(colX.opponents, y, colWidths.opponents, rowHeight);
+    doc.rect(colX.time, y, colWidths.time, rowHeight);
+    doc.rect(colX.field, y, colWidths.field, rowHeight);
+    doc.text("Division", colX.division + 6, y + 15);
+    doc.text("Opponents", colX.opponents + 6, y + 15);
+    doc.text("Time", colX.time + 6, y + 15);
+    doc.text("Field", colX.field + 6, y + 15);
+    y += rowHeight;
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.setTextColor(28, 23, 48);
-    doc.setDrawColor(226, 219, 201);
 
-    for (const f of group.rows) {
-      if (y > pageHeight - margin - 20) {
-        doc.addPage();
-        y = margin;
-      }
-      const label = divisionLabelMap[f.division] || f.division || "Garlandale FC";
-      doc.text(label, colX.team + 6, y + 14, { maxWidth: 150 });
-      doc.text(f.opponent || "", colX.opp + 6, y + 14, { maxWidth: 155 });
-      doc.text(f.time || "", colX.time + 6, y + 14);
-      doc.text(f.venue || "", colX.field + 6, y + 14, { maxWidth: tableWidth - (colX.field - margin) - 6 });
-      doc.line(margin, y + 20, margin + tableWidth, y + 20);
-      y += 20;
+    for (const row of group.rows) {
+      ensureSpace(rowHeight);
+      doc.rect(colX.division, y, colWidths.division, rowHeight);
+      doc.rect(colX.opponents, y, colWidths.opponents, rowHeight);
+      doc.rect(colX.time, y, colWidths.time, rowHeight);
+      doc.rect(colX.field, y, colWidths.field, rowHeight);
+      doc.text(row.team || "", colX.division + 6, y + 15, { maxWidth: colWidths.division - 10 });
+      doc.text(row.vs || "", colX.opponents + 6, y + 15, { maxWidth: colWidths.opponents - 10 });
+      doc.text(row.time || "", colX.time + 6, y + 15, { maxWidth: colWidths.time - 10 });
+      doc.text(row.venue || "", colX.field + 6, y + 15, { maxWidth: colWidths.field - 10 });
+      y += rowHeight;
     }
 
     y += 30;
   }
 
+  // Footer notices + contact block, matching the real sheet.
+  ensureSpace(70);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(0, 0, 0);
+  for (const notice of footerNotices) {
+    doc.text(notice, margin, y);
+    y += 16;
+  }
+  y += 14;
+  doc.text("Contact person:", margin, y);
+  y += 16;
+  doc.text(contactName, margin, y);
+  y += 16;
+  doc.text(contactPhone, margin, y);
+
   return doc;
 }
 
-export function downloadFixturesPdf(fixtures, divisionLabelMap, filename) {
-  const doc = generateFixturesPdf(fixtures, divisionLabelMap);
+export function downloadFixturesPdf(groups, options, filename) {
+  const doc = generateFixturesPdf(groups, options);
   doc.save(filename || "garlandale-fixtures.pdf");
 }

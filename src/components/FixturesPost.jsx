@@ -83,6 +83,7 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
   const [handle, setHandle] = useState("@GARLANDALEFC");
   const [hashtag, setHashtag] = useState("#WEAREGARLANDALE");
   const [downloading, setDownloading] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const posterRef = React.useRef(null);
   const fileInputRef = React.useRef(null);
 
@@ -90,7 +91,12 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
   const [importMessage, setImportMessage] = useState("");
   const [pendingUnmapped, setPendingUnmapped] = useState([]); // divisions awaiting a label
   const [pendingLabels, setPendingLabels] = useState({}); // division -> typed label, while confirming
-  const [importedFixtures, setImportedFixtures] = useState(null); // last successfully parsed import
+  const [pendingFixtures, setPendingFixtures] = useState(null); // parsed fixtures awaiting label confirmation
+
+  const [footerNotice1, setFooterNotice1] = useState("PLEASE BRING YOUR SHINGUARDS!");
+  const [footerNotice2, setFooterNotice2] = useState("PLEASE REPORT 1 HOUR BEFORE YOUR GAME!");
+  const [contactName, setContactName] = useState("Yusuf Nacerodien");
+  const [contactPhone, setContactPhone] = useState("083-556-4102");
 
   const divisionLabelMap = useMemo(() => {
     const map = {};
@@ -117,9 +123,9 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
         return;
       }
       const unmapped = findUnmappedDivisions(fixtures, divisionLabelMap);
-      setImportedFixtures(fixtures);
       if (unmapped.length > 0) {
         setPendingUnmapped(unmapped);
+        setPendingFixtures(fixtures);
         const guesses = {};
         unmapped.forEach((d) => { guesses[d] = cleanDivisionGuess(d); });
         setPendingLabels(guesses);
@@ -143,17 +149,26 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
         if (label) await onSaveDivisionLabel(division, label);
       }
       const newMap = { ...divisionLabelMap, ...pendingLabels };
-      setRawText(buildFixtureTextFromImport(importedFixtures, newMap));
+      setRawText(buildFixtureTextFromImport(pendingFixtures, newMap));
       setPendingUnmapped([]);
-      setImportMessage(`Applied ${importedFixtures.length} fixture${importedFixtures.length === 1 ? "" : "s"} to the list below.`);
+      setImportMessage(`Applied ${pendingFixtures.length} fixture${pendingFixtures.length === 1 ? "" : "s"} to the list below.`);
     } finally {
       setImportBusy(false);
     }
   }
 
   function handleDownloadPdf() {
-    if (!importedFixtures) return;
-    downloadFixturesPdf(importedFixtures, divisionLabelMap, `garlandale-fixtures-${todayISO()}.pdf`);
+    if (groups.length === 0) return;
+    setDownloadingPdf(true);
+    try {
+      downloadFixturesPdf(
+        groups,
+        { footerNotices: [footerNotice1, footerNotice2].filter(Boolean), contactName, contactPhone },
+        `garlandale-fixtures-${todayISO()}.pdf`
+      );
+    } finally {
+      setDownloadingPdf(false);
+    }
   }
 
   async function handleDownload() {
@@ -185,8 +200,10 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
           <div className="gfc-page-sub">Import this week's fixtures, preview the poster, download for Instagram</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          {importedFixtures && (
-            <button className="gfc-btn gfc-btn-outline" onClick={handleDownloadPdf}>Download PDF</button>
+          {groups.length > 0 && (
+            <button className="gfc-btn gfc-btn-outline" onClick={handleDownloadPdf} disabled={downloadingPdf}>
+              {downloadingPdf ? "Preparing…" : "Download PDF"}
+            </button>
           )}
           <button className="gfc-btn gfc-btn-primary" onClick={handleDownload} disabled={downloading}>
             {downloading ? "Preparing…" : "Download image"}
@@ -257,6 +274,26 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
             <div className="gfc-field">
               <label className="gfc-label">Hashtag</label>
               <input className="gfc-input" value={hashtag} onChange={(e) => setHashtag(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="gfc-panel-title" style={{ marginTop: 16, marginBottom: 10 }}>PDF footer (weekly sheet only)</div>
+          <div className="gfc-field">
+            <label className="gfc-label">Footer notice 1</label>
+            <input className="gfc-input" value={footerNotice1} onChange={(e) => setFooterNotice1(e.target.value)} />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Footer notice 2</label>
+            <input className="gfc-input" value={footerNotice2} onChange={(e) => setFooterNotice2(e.target.value)} />
+          </div>
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Contact name</label>
+              <input className="gfc-input" value={contactName} onChange={(e) => setContactName(e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Contact phone</label>
+              <input className="gfc-input" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
             </div>
           </div>
         </div>
