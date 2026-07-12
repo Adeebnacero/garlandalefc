@@ -188,6 +188,13 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
 
 /* ---------- PLAYER MODAL (add/edit) ---------- */
 
+// The player-facing app is paused for now - flip this back to true to
+// restore the "App account" invite/resend section on a player's profile.
+// Nothing else needs to change: the underlying user_id column,
+// current_player_id(), and the invite-player Edge Function all stay in
+// place either way.
+const PLAYER_APP_INVITE_ENABLED = false;
+
 export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers, onInvitePlayer }) {
   const [form, setForm] = useState(() => ({
     id: player?.id || "",
@@ -370,7 +377,7 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
             Will appear under <span className="gfc-agepill" style={{ marginLeft: 4 }}>{previewAgeGroup}</span>
           </div>
 
-          {player && (
+          {PLAYER_APP_INVITE_ENABLED && player && (
             <div style={{ marginTop: 16, background: T.paperDim, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14 }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: T.indigo, marginBottom: 8 }}>
                 App account
