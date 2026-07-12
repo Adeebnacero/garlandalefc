@@ -95,6 +95,8 @@ function MainApp({ role, onLogout }) {
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailMessage, setEmailMessage] = useState("");
 
+  const [divisionLabels, setDivisionLabels] = useState([]);
+
   const [staffList, setStaffList] = useState([]);
   const [usersBusy, setUsersBusy] = useState(false);
   const [usersMessage, setUsersMessage] = useState("");
@@ -147,6 +149,30 @@ function MainApp({ role, onLogout }) {
     } catch (e) {
       setSaveError(e.message || "Something went wrong. Please try again.");
       return e.message || "Could not save settings.";
+    }
+  }
+
+  const loadDivisionLabels = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("division_labels").select("*").order("division_key");
+      if (error) throw error;
+      setDivisionLabels((rows || []).map((r) => ({ id: r.id, divisionKey: r.division_key, teamLabel: r.team_label })));
+    } catch (e) {
+      setLoadError((prev) => prev || e.message || "Could not load division labels.");
+    }
+  }, []);
+
+  async function saveDivisionLabel(divisionKey, teamLabel) {
+    try {
+      const { error } = await supabase
+        .from("division_labels")
+        .upsert({ division_key: divisionKey, team_label: teamLabel }, { onConflict: "division_key" });
+      if (error) throw error;
+      await loadDivisionLabels();
+      return null;
+    } catch (e) {
+      setSaveError(e.message || "Could not save that division label.");
+      return e.message;
     }
   }
 
@@ -306,7 +332,8 @@ function MainApp({ role, onLogout }) {
     loadBackups();
     loadClubSettings();
     loadStaffList();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList]);
+    loadDivisionLabels();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -937,7 +964,9 @@ function MainApp({ role, onLogout }) {
           />
         )}
 
-        {tab === "fixtures-post" && <FixturesPostView />}
+        {tab === "fixtures-post" && (
+          <FixturesPostView divisionLabels={divisionLabels} onSaveDivisionLabel={saveDivisionLabel} />
+        )}
 
         {tab === "settings" && (
           <SettingsView clubSettings={clubSettings} onSave={saveClubSettings} />

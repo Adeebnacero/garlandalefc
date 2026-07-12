@@ -3,6 +3,13 @@ import html2canvas from "html2canvas";
 import { T } from "../theme.js";
 import { todayISO } from "../lib/format.js";
 import BADGE_SRC from "../assets/badge.png";
+import {
+  parseFederationWorkbook,
+  extractGarlandaleFixtures,
+  findUnmappedDivisions,
+  buildFixtureTextFromImport,
+} from "../lib/fixtureImport.js";
+import { downloadFixturesPdf } from "../lib/fixturePdf.js";
 
 export const FIXTURE_TEXT_PLACEHOLDER = `29 April 2026
 GFC Reserves vs Barmsley Spurs | 19h00 | Hickory Rd
@@ -66,15 +73,88 @@ export function formatFixtureHeader(headerRaw) {
   return suffix ? `${label} – ${suffix.toUpperCase()}` : label;
 }
 
-export function FixturesPostView() {
+function cleanDivisionGuess(text) {
+  return String(text || "").replace(/^[A-Za-z0-9]+\s*-\s*/, "").trim();
+}
+
+export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
   const [rawText, setRawText] = useState(FIXTURE_TEXT_PLACEHOLDER);
   const [dateRangeLabel, setDateRangeLabel] = useState("29 APRIL – 02 MAY 2026");
   const [handle, setHandle] = useState("@GARLANDALEFC");
   const [hashtag, setHashtag] = useState("#WEAREGARLANDALE");
   const [downloading, setDownloading] = useState(false);
   const posterRef = React.useRef(null);
+  const fileInputRef = React.useRef(null);
+
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
+  const [pendingUnmapped, setPendingUnmapped] = useState([]); // divisions awaiting a label
+  const [pendingLabels, setPendingLabels] = useState({}); // division -> typed label, while confirming
+  const [importedFixtures, setImportedFixtures] = useState(null); // last successfully parsed import
+
+  const divisionLabelMap = useMemo(() => {
+    const map = {};
+    (divisionLabels || []).forEach((d) => { map[d.divisionKey] = d.teamLabel; });
+    return map;
+  }, [divisionLabels]);
 
   const groups = useMemo(() => parseFixtureText(rawText), [rawText]);
+
+  async function handleFileSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportBusy(true);
+    setImportMessage("");
+    setPendingUnmapped([]);
+    try {
+      const buffer = await file.arrayBuffer();
+      const rows = parseFederationWorkbook(buffer);
+      const fixtures = extractGarlandaleFixtures(rows);
+      if (fixtures.length === 0) {
+        setImportMessage("No Garlandale fixtures found in that file — double check it's the right spreadsheet.");
+        setImportBusy(false);
+        return;
+      }
+      const unmapped = findUnmappedDivisions(fixtures, divisionLabelMap);
+      setImportedFixtures(fixtures);
+      if (unmapped.length > 0) {
+        setPendingUnmapped(unmapped);
+        const guesses = {};
+        unmapped.forEach((d) => { guesses[d] = cleanDivisionGuess(d); });
+        setPendingLabels(guesses);
+        setImportMessage(`Found ${fixtures.length} fixture${fixtures.length === 1 ? "" : "s"}. A few divisions need a friendly name before continuing.`);
+      } else {
+        setImportMessage(`Found ${fixtures.length} fixture${fixtures.length === 1 ? "" : "s"}. Applied to the fixture list below.`);
+        setRawText(buildFixtureTextFromImport(fixtures, divisionLabelMap));
+      }
+    } catch (err) {
+      setImportMessage("Could not read that file — make sure it's the federation's .xls/.xlsx fixture sheet.");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function handleConfirmUnmapped() {
+    setImportBusy(true);
+    try {
+      for (const division of pendingUnmapped) {
+        const label = (pendingLabels[division] || "").trim();
+        if (label) await onSaveDivisionLabel(division, label);
+      }
+      const newMap = { ...divisionLabelMap, ...pendingLabels };
+      setRawText(buildFixtureTextFromImport(importedFixtures, newMap));
+      setPendingUnmapped([]);
+      setImportMessage(`Applied ${importedFixtures.length} fixture${importedFixtures.length === 1 ? "" : "s"} to the list below.`);
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  function handleDownloadPdf() {
+    if (!importedFixtures) return;
+    downloadFixturesPdf(importedFixtures, divisionLabelMap, `garlandale-fixtures-${todayISO()}.pdf`);
+  }
 
   async function handleDownload() {
     if (!posterRef.current) return;
@@ -102,11 +182,51 @@ export function FixturesPostView() {
       <div className="gfc-topbar">
         <div>
           <div className="gfc-page-title gfc-display">Fixtures Post</div>
-          <div className="gfc-page-sub">Paste this week's fixtures, preview the poster, download for Instagram</div>
+          <div className="gfc-page-sub">Import this week's fixtures, preview the poster, download for Instagram</div>
         </div>
-        <button className="gfc-btn gfc-btn-primary" onClick={handleDownload} disabled={downloading}>
-          {downloading ? "Preparing…" : "Download image"}
+        <div style={{ display: "flex", gap: 8 }}>
+          {importedFixtures && (
+            <button className="gfc-btn gfc-btn-outline" onClick={handleDownloadPdf}>Download PDF</button>
+          )}
+          <button className="gfc-btn gfc-btn-primary" onClick={handleDownload} disabled={downloading}>
+            {downloading ? "Preparing…" : "Download image"}
+          </button>
+        </div>
+      </div>
+
+      <div className="gfc-panel" style={{ padding: 16, marginBottom: 18 }}>
+        <div className="gfc-panel-title" style={{ marginBottom: 10 }}>Import from federation spreadsheet</div>
+        <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 10 }}>
+          Upload the federation's fixture spreadsheet (.xls or .xlsx) — every Garlandale match across every division gets pulled out automatically and applied to the fixture list below.
+        </div>
+        <input ref={fileInputRef} type="file" accept=".xls,.xlsx" onChange={handleFileSelected} style={{ display: "none" }} />
+        <button className="gfc-btn gfc-btn-outline" onClick={() => fileInputRef.current?.click()} disabled={importBusy}>
+          {importBusy ? "Working…" : "Choose spreadsheet…"}
         </button>
+        {importMessage && (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: T.inkSoft, fontWeight: 600 }}>{importMessage}</div>
+        )}
+
+        {pendingUnmapped.length > 0 && (
+          <div style={{ marginTop: 14, background: T.amberSoft, border: `1px solid ${T.gold}`, borderRadius: 8, padding: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#7a5410", marginBottom: 10 }}>
+              New division{pendingUnmapped.length === 1 ? "" : "s"} found — what should {pendingUnmapped.length === 1 ? "this show as" : "these show as"}? (remembered for next time)
+            </div>
+            {pendingUnmapped.map((division) => (
+              <div key={division} className="gfc-field" style={{ marginBottom: 8 }}>
+                <label className="gfc-label" style={{ fontWeight: 400, textTransform: "none", fontSize: 11.5 }}>{division}</label>
+                <input
+                  className="gfc-input"
+                  value={pendingLabels[division] || ""}
+                  onChange={(e) => setPendingLabels((prev) => ({ ...prev, [division]: e.target.value }))}
+                />
+              </div>
+            ))}
+            <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={handleConfirmUnmapped} disabled={importBusy}>
+              Save &amp; apply to fixture list
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="gfc-row2" style={{ gridTemplateColumns: "380px 1fr", alignItems: "flex-start" }}>
