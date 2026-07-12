@@ -178,3 +178,24 @@ export function toDbAsset(form) {
     notes: form.notes || "",
   };
 }
+
+export function fromDbFinanceEntry(row) {
+  return {
+    id: row.id,
+    date: row.entry_date || "",
+    description: row.description || "",
+    category: row.category || "",
+    type: row.type || "income",
+    amount: Number(row.amount) || 0,
+  };
+}
+
+export function toDbFinanceEntry(form) {
+  return {
+    entry_date: form.date || null,
+    description: form.description || "",
+    category: form.category || "",
+    type: form.type === "expense" ? "expense" : "income",
+    amount: Number(form.amount) || 0,
+  };
+}

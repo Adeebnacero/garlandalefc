@@ -14,6 +14,8 @@ import {
   toDbItem,
   fromDbAsset,
   toDbAsset,
+  fromDbFinanceEntry,
+  toDbFinanceEntry,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
 import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
@@ -30,6 +32,7 @@ import { MessagesView } from "./components/Messages.jsx";
 import { MatchdayView, MatchModal } from "./components/Matchday.jsx";
 import { KitView, ItemModal } from "./components/Kit.jsx";
 import { AssetsView, AssetModal } from "./components/Assets.jsx";
+import { FinanceView, FinanceEntryModal } from "./components/Finance.jsx";
 import { BackupsView } from "./components/Backups.jsx";
 import { FixturesPostView } from "./components/FixturesPost.jsx";
 import { SettingsView } from "./components/Settings.jsx";
@@ -46,6 +49,7 @@ const CLUB_OPS_NAV = [
   { id: "dashboard", label: "Dashboard", icon: "◆", roles: ["admin", "treasurer"] },
   { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
   { id: "subscriptions", label: "Subscriptions", icon: "$", roles: ["admin", "treasurer"] },
+  { id: "finance", label: "Finance", icon: "🏦", roles: ["admin", "treasurer"] },
   { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
   { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
   { id: "assets", label: "Club Assets", icon: "📦", roles: ["admin", "coach"] },
@@ -87,6 +91,9 @@ function MainApp({ role, onLogout }) {
 
   const [assets, setAssets] = useState([]);
   const [editingAsset, setEditingAsset] = useState(null); // club asset or "new" or null
+
+  const [financeEntries, setFinanceEntries] = useState([]);
+  const [editingFinanceEntry, setEditingFinanceEntry] = useState(null); // entry or "new" or null
 
   const [tiers, setTiers] = useState([]);
   const [editingTier, setEditingTier] = useState(null); // tier object or "new" or null
@@ -341,6 +348,16 @@ function MainApp({ role, onLogout }) {
     }
   }, []);
 
+  const loadFinanceEntries = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("finance_entries").select("*").order("entry_date", { ascending: false });
+      if (error) throw error;
+      setFinanceEntries((rows || []).map(fromDbFinanceEntry));
+    } catch (e) {
+      setLoadError((prev) => prev || e.message || "Could not load finance entries.");
+    }
+  }, []);
+
   useEffect(() => {
     loadPlayers();
     loadMatches();
@@ -351,7 +368,8 @@ function MainApp({ role, onLogout }) {
     loadStaffList();
     loadDivisionLabels();
     loadAssets();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets]);
+    loadFinanceEntries();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -661,6 +679,37 @@ function MainApp({ role, onLogout }) {
       setSaveError(e.message || "Something went wrong. Please try again.");
     }
     setEditingAsset(null);
+  }
+
+  async function saveFinanceEntry(form) {
+    setSaveError("");
+    const payload = toDbFinanceEntry(form);
+    try {
+      if (form.id) {
+        const { error } = await supabase.from("finance_entries").update(payload).eq("id", form.id);
+        if (error) throw error;
+        setFinanceEntries((prev) => prev.map((e) => (e.id === form.id ? { ...e, ...form, amount: Number(form.amount) } : e)));
+      } else {
+        const { data: inserted, error } = await supabase.from("finance_entries").insert(payload).select().single();
+        if (error) throw error;
+        setFinanceEntries((prev) => [fromDbFinanceEntry(inserted), ...prev]);
+      }
+      setEditingFinanceEntry(null);
+    } catch (e) {
+      setSaveError(e.message || "Something went wrong. Please try again.");
+    }
+  }
+
+  async function deleteFinanceEntry(id) {
+    setSaveError("");
+    try {
+      const { error } = await supabase.from("finance_entries").delete().eq("id", id);
+      if (error) throw error;
+      setFinanceEntries((prev) => prev.filter((e) => e.id !== id));
+    } catch (e) {
+      setSaveError(e.message || "Something went wrong. Please try again.");
+    }
+    setEditingFinanceEntry(null);
   }
 
   async function issueItem({ playerId, itemId, size, quantity, dateIssued, notes }) {
@@ -973,6 +1022,16 @@ function MainApp({ role, onLogout }) {
           />
         )}
 
+        {tab === "finance" && (
+          <FinanceView
+            financeEntries={financeEntries}
+            players={enriched}
+            assets={assets}
+            onAdd={() => setEditingFinanceEntry("new")}
+            onEdit={(entry) => setEditingFinanceEntry(entry)}
+          />
+        )}
+
         {tab === "matchday" && (
           <MatchdayView
             matches={matches}
@@ -1125,6 +1184,15 @@ function MainApp({ role, onLogout }) {
           onClose={() => setEditingAsset(null)}
           onSave={saveAsset}
           onDelete={deleteAsset}
+        />
+      )}
+
+      {editingFinanceEntry && (
+        <FinanceEntryModal
+          entry={editingFinanceEntry === "new" ? null : editingFinanceEntry}
+          onClose={() => setEditingFinanceEntry(null)}
+          onSave={saveFinanceEntry}
+          onDelete={deleteFinanceEntry}
         />
       )}
     </div>
