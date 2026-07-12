@@ -47,7 +47,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
       }
     }
     const assetsValue = (assets || []).reduce((s, a) => s + (Number(a.quantity) || 0) * (Number(a.unitValue) || 0), 0);
-    return { balance, totalIncome, totalExpense, netWorth: balance + assetsValue };
+    return { balance, totalIncome, totalExpense, assetsValue, netWorth: balance + assetsValue };
   }, [ledger, assets]);
 
   const filtered = useMemo(() => {
@@ -87,6 +87,11 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
           <div className="gfc-stat-value gfc-mono">{fmtMoney(stats.totalExpense)}</div>
         </div>
         <div className="gfc-stat">
+          <div className="gfc-stat-accent" style={{ background: T.goldDeep }} />
+          <div className="gfc-stat-label">Assets value</div>
+          <div className="gfc-stat-value gfc-mono">{fmtMoney(stats.assetsValue)}</div>
+        </div>
+        <div className="gfc-stat">
           <div className="gfc-stat-accent" style={{ background: T.gold }} />
           <div className="gfc-stat-label">Net worth <span style={{ fontWeight: 400, textTransform: "none" }}>(cash + assets)</span></div>
           <div className="gfc-stat-value gfc-mono">{fmtMoney(stats.netWorth)}</div>
@@ -109,6 +114,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
             Add your opening balance to get started, then log bank transactions, donations, and expenses as they happen.
           </div>
         ) : (
+          <div className="gfc-scroll-wrap">
           <table className="gfc-table">
             <thead>
               <tr>
@@ -139,6 +145,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

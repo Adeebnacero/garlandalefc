@@ -53,6 +53,7 @@ export function UsersView({ staffList, onInvite, onRemove, busy, message }) {
         {staffList.length === 0 ? (
           <div className="gfc-empty">No staff invited yet.</div>
         ) : (
+          <div className="gfc-scroll-wrap">
           <table className="gfc-table">
             <thead><tr><th>Email</th><th>Role</th><th>Invited</th><th></th></tr></thead>
             <tbody>
@@ -66,6 +67,7 @@ export function UsersView({ staffList, onInvite, onRemove, busy, message }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

@@ -102,6 +102,7 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
           </div>
         </div>
       ) : viewMode === "cards" ? (
+        <div className="gfc-scroll-wrap">
         <div className="gfc-squad-grid">
           {filtered.map((p) => (
             <div key={p.id} className="gfc-card" onClick={() => onEdit(p)}>
@@ -137,8 +138,10 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
             </div>
           ))}
         </div>
+        </div>
       ) : (
         <div className="gfc-panel">
+          <div className="gfc-scroll-wrap">
           <table className="gfc-table">
             <thead>
               <tr>
@@ -176,6 +179,7 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>
