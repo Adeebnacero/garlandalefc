@@ -208,3 +208,17 @@ export function fromDbReminderBatch(row) {
     status: row.status,
   };
 }
+
+export function fromDbAuditLog(row) {
+  return {
+    id: row.id,
+    tableName: row.table_name,
+    recordId: row.record_id,
+    action: row.action,
+    oldData: row.old_data,
+    newData: row.new_data,
+    changedBy: row.changed_by,
+    changedByEmail: row.changed_by_email,
+    changedAt: row.changed_at,
+  };
+}

@@ -17,6 +17,7 @@ import {
   fromDbFinanceEntry,
   toDbFinanceEntry,
   fromDbReminderBatch,
+  fromDbAuditLog,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
 import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
@@ -97,6 +98,8 @@ function MainApp({ role, onLogout }) {
   const [editingFinanceEntry, setEditingFinanceEntry] = useState(null); // entry or "new" or null
 
   const [pendingReminderBatch, setPendingReminderBatch] = useState(null);
+
+  const [auditLog, setAuditLog] = useState([]);
 
   const [tiers, setTiers] = useState([]);
   const [editingTier, setEditingTier] = useState(null); // tier object or "new" or null
@@ -400,6 +403,20 @@ function MainApp({ role, onLogout }) {
     }
   }, []);
 
+  const loadAuditLog = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase
+        .from("audit_log")
+        .select("*")
+        .order("changed_at", { ascending: false })
+        .limit(200);
+      if (error) throw error; // non-admins get an RLS-denied error here, which is expected and fine
+      setAuditLog((rows || []).map(fromDbAuditLog));
+    } catch (e) {
+      // Silent for non-admins - they simply can't see this table, by design.
+    }
+  }, []);
+
   useEffect(() => {
     loadPlayers();
     loadMatches();
@@ -412,7 +429,8 @@ function MainApp({ role, onLogout }) {
     loadAssets();
     loadFinanceEntries();
     loadReminderBatch();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch]);
+    loadAuditLog();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -1131,6 +1149,8 @@ function MainApp({ role, onLogout }) {
             onRestoreFromFile={restoreFromUploadedFile}
             busy={backupBusy}
             lastMessage={backupMessage}
+            auditLog={auditLog}
+            players={enriched}
           />
         )}
 
