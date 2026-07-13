@@ -16,6 +16,7 @@ import {
   toDbAsset,
   fromDbFinanceEntry,
   toDbFinanceEntry,
+  fromDbReminderBatch,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
 import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
@@ -94,6 +95,8 @@ function MainApp({ role, onLogout }) {
 
   const [financeEntries, setFinanceEntries] = useState([]);
   const [editingFinanceEntry, setEditingFinanceEntry] = useState(null); // entry or "new" or null
+
+  const [pendingReminderBatch, setPendingReminderBatch] = useState(null);
 
   const [tiers, setTiers] = useState([]);
   const [editingTier, setEditingTier] = useState(null); // tier object or "new" or null
@@ -381,6 +384,22 @@ function MainApp({ role, onLogout }) {
     }
   }, []);
 
+  const loadReminderBatch = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase
+        .from("reminder_batches")
+        .select("*")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      setPendingReminderBatch(rows && rows.length > 0 ? fromDbReminderBatch(rows[0]) : null);
+    } catch (e) {
+      // Non-critical - a missing/failed load just means the reminder banner
+      // doesn't show up this session, nothing else depends on it.
+    }
+  }, []);
+
   useEffect(() => {
     loadPlayers();
     loadMatches();
@@ -392,7 +411,8 @@ function MainApp({ role, onLogout }) {
     loadDivisionLabels();
     loadAssets();
     loadFinanceEntries();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries]);
+    loadReminderBatch();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -733,6 +753,17 @@ function MainApp({ role, onLogout }) {
       setSaveError(e.message || "Something went wrong. Please try again.");
     }
     setEditingFinanceEntry(null);
+  }
+
+  async function dismissReminderBatch() {
+    if (!pendingReminderBatch) return;
+    try {
+      const { error } = await supabase.from("reminder_batches").update({ status: "dismissed" }).eq("id", pendingReminderBatch.id);
+      if (error) throw error;
+      setPendingReminderBatch(null);
+    } catch (e) {
+      setSaveError(e.message || "Could not dismiss the reminder banner.");
+    }
   }
 
   async function issueItem({ playerId, itemId, size, quantity, dateIssued, notes }) {
@@ -1135,6 +1166,8 @@ function MainApp({ role, onLogout }) {
             onBulkEmailStatements={sendBulkStatements}
             emailBusy={emailBusy}
             emailMessage={emailMessage}
+            pendingReminderBatch={pendingReminderBatch}
+            onDismissReminderBatch={dismissReminderBatch}
           />
         )}
       </main>

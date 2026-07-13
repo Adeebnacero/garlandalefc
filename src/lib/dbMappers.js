@@ -200,3 +200,11 @@ export function toDbFinanceEntry(form) {
     amount: Number(form.amount) || 0,
   };
 }
+
+export function fromDbReminderBatch(row) {
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    status: row.status,
+  };
+}

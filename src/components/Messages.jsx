@@ -3,9 +3,18 @@ import { T } from "../theme.js";
 import { waLink, smsLink, fillTemplate, TEMPLATES } from "../lib/messaging.js";
 import { Badge } from "./shared.jsx";
 
-export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds, templateId, setTemplateId, customText, setCustomText, onEmailStatement, onBulkEmailStatements, emailBusy, emailMessage }) {
+export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds, templateId, setTemplateId, customText, setCustomText, onEmailStatement, onBulkEmailStatements, emailBusy, emailMessage, pendingReminderBatch, onDismissReminderBatch }) {
   const [msgAgeFilter, setMsgAgeFilter] = useState("All");
   const [msgStatusFilter, setMsgStatusFilter] = useState("All");
+
+  const owingPlayers = useMemo(() => enriched.filter((p) => p.balance > 0), [enriched]);
+
+  function handleReviewReminders() {
+    setMsgAgeFilter("All");
+    setMsgStatusFilter("All");
+    setTemplateId("payment_reminder");
+    setSelectedIds(owingPlayers.map((p) => p.id));
+  }
 
   const pool = useMemo(() => {
     return enriched.filter((p) => {
@@ -37,6 +46,18 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
           <div className="gfc-page-sub">Trigger WhatsApp or SMS messages to players / guardians</div>
         </div>
       </div>
+
+      {pendingReminderBatch && (
+        <div style={{ background: T.indigoSoft, border: `1px solid ${T.indigo}`, borderRadius: 10, padding: "12px 14px", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 12.5, color: "#fff" }}>
+            <strong>📅 Monthly payment reminders are due.</strong> {owingPlayers.length} player{owingPlayers.length === 1 ? "" : "s"} currently {owingPlayers.length === 1 ? "has" : "have"} an outstanding balance.
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={handleReviewReminders}>Review &amp; select</button>
+            <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={onDismissReminderBatch}>Dismiss</button>
+          </div>
+        </div>
+      )}
 
       <div style={{ background: T.amberSoft, border: `1px solid ${T.gold}`, borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#7a5410", marginBottom: 18 }}>
         <strong>How sending works:</strong> there's no bulk-send API connected, so each message opens a pre-filled WhatsApp or SMS conversation for you to review and hit send on individually — nothing goes out automatically.
