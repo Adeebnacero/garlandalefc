@@ -2,135 +2,47 @@ import React, { useState, useMemo } from "react";
 import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { T } from "../theme.js";
 import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
+import {
+  buildCombinedLedger,
+  computePeriodRange,
+  computePeriodLabel,
+  computeBalanceCutoff,
+  isPastPeriod as isPastPeriodCalc,
+  computeStats,
+  computeMonthlyChartData,
+  computeAvailableYears,
+  filterLedger,
+  MONTH_NAMES,
+} from "../lib/financeCalc.js";
 
 const INCOME_CATEGORIES = ["Donation", "Sponsorship", "Fundraising", "Grant", "Opening Balance", "Other income"];
 const EXPENSE_CATEGORIES = ["Equipment", "Referee fees", "Ground hire", "Utilities", "Admin/bank fees", "Other expense"];
-const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-
-/**
- * Builds one combined ledger from two sources:
- *  - manual finance_entries (bank transactions, donations, other income/expense)
- *  - subscription payments, read LIVE from each player's payment history
- * Subscription payments are never copied into finance_entries - this keeps
- * a single source of truth, so editing a payment in a player's ledger is
- * automatically reflected here too, with no risk of the two drifting apart.
- */
-function buildCombinedLedger(financeEntries, players) {
-  const manual = financeEntries.map((e) => ({
-    id: e.id, date: e.date, description: e.description, category: e.category,
-    type: e.type, amount: e.amount, isSubscription: false,
-  }));
-
-  const subscriptionRows = (players || []).flatMap((p) =>
-    (p.payments || []).map((pm) => ({
-      id: `sub-${pm.id}`, date: pm.date, description: `Subscription — ${p.name}`,
-      category: "Subscription", type: "income", amount: Number(pm.amount) || 0, isSubscription: true,
-    }))
-  );
-
-  return [...manual, ...subscriptionRows].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-}
 
 export function FinanceView({ financeEntries, players, assets, onAdd, onEdit }) {
   const [categoryFilter, setCategoryFilter] = useState("All");
 
   const today = useMemo(() => new Date(), []);
   const [viewMode, setViewMode] = useState("month"); // "month" | "year" | "all"
-  const [selectedYear, setSelectedYear] = useState(today.getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState(today.getMonth()); // 0-11
+  const [selectedYear, setSelectedYear] = useState(today.getUTCFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(today.getUTCMonth()); // 0-11
 
   const ledger = useMemo(() => buildCombinedLedger(financeEntries, players), [financeEntries, players]);
 
-  const availableYears = useMemo(() => {
-    const years = new Set([today.getFullYear()]);
-    ledger.forEach((r) => {
-      const d = new Date(r.date);
-      if (!isNaN(d.getTime())) years.add(d.getFullYear());
-    });
-    return Array.from(years).sort((a, b) => b - a);
-  }, [ledger, today]);
+  const availableYears = useMemo(() => computeAvailableYears(ledger, today), [ledger, today]);
 
-  // The period currently being viewed, as [start, end] (end is inclusive,
-  // last instant of the period) - drives both the stat totals and which
-  // ledger rows are shown for "Month"/"Year" modes.
-  const periodRange = useMemo(() => {
-    if (viewMode === "month") {
-      const start = new Date(selectedYear, selectedMonth, 1);
-      const end = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
-      return { start, end };
-    }
-    if (viewMode === "year") {
-      const start = new Date(selectedYear, 0, 1);
-      const end = new Date(selectedYear, 11, 31, 23, 59, 59);
-      return { start, end };
-    }
-    return { start: null, end: null }; // "all"
-  }, [viewMode, selectedYear, selectedMonth]);
+  const periodRange = useMemo(() => computePeriodRange(viewMode, selectedYear, selectedMonth), [viewMode, selectedYear, selectedMonth]);
 
-  const periodLabel = useMemo(() => {
-    if (viewMode === "month") return `${MONTH_NAMES[selectedMonth]} ${selectedYear}`;
-    if (viewMode === "year") return `${selectedYear}`;
-    return "All time";
-  }, [viewMode, selectedYear, selectedMonth]);
+  const periodLabel = useMemo(() => computePeriodLabel(viewMode, selectedYear, selectedMonth), [viewMode, selectedYear, selectedMonth]);
 
-  // "As of" cutoff for the cash balance - the end of the selected period,
-  // or today if that period includes today (so looking at the current
-  // month/year still shows today's real balance, not an artificially
-  // earlier one).
-  const balanceCutoff = useMemo(() => {
-    if (!periodRange.end) return today;
-    return periodRange.end < today ? periodRange.end : today;
-  }, [periodRange, today]);
+  const balanceCutoff = useMemo(() => computeBalanceCutoff(periodRange, today), [periodRange, today]);
 
-  const isPastPeriod = periodRange.end && periodRange.end < today;
+  const isPastPeriodValue = isPastPeriodCalc(periodRange, today);
 
-  const stats = useMemo(() => {
-    let balance = 0;
-    let totalIncome = 0;
-    let totalExpense = 0;
-    for (const row of ledger) {
-      const d = new Date(row.date);
-      const signed = row.type === "expense" ? -row.amount : row.amount;
-      if (d <= balanceCutoff) balance += signed;
+  const stats = useMemo(() => computeStats(ledger, periodRange, balanceCutoff, assets), [ledger, periodRange, balanceCutoff, assets]);
 
-      const withinPeriod = !periodRange.start || (d >= periodRange.start && d <= periodRange.end);
-      if (withinPeriod && row.category !== "Opening Balance") {
-        if (row.type === "expense") totalExpense += row.amount;
-        else totalIncome += row.amount;
-      }
-    }
-    const assetsValue = (assets || []).reduce((s, a) => s + (Number(a.quantity) || 0) * (Number(a.unitValue) || 0), 0);
-    return { balance, totalIncome, totalExpense, assetsValue, netWorth: balance + assetsValue };
-  }, [ledger, assets, balanceCutoff, periodRange]);
+  const monthlyChartData = useMemo(() => computeMonthlyChartData(ledger, viewMode, selectedYear, today), [ledger, viewMode, selectedYear, today]);
 
-  // Monthly income/expense breakdown for whichever year is currently
-  // selected - shown regardless of Month/Year/All-time mode, since it's a
-  // "look at the shape of the year" view rather than a single-period total.
-  const monthlyChartData = useMemo(() => {
-    const chartYear = viewMode === "all" ? today.getFullYear() : selectedYear;
-    const months = MONTH_NAMES.map((name, i) => ({ month: name.slice(0, 3), income: 0, expense: 0, _i: i }));
-    ledger.forEach((row) => {
-      if (row.category === "Opening Balance") return;
-      const d = new Date(row.date);
-      if (isNaN(d.getTime()) || d.getFullYear() !== chartYear) return;
-      const bucket = months[d.getMonth()];
-      if (row.type === "expense") bucket.expense += row.amount;
-      else bucket.income += row.amount;
-    });
-    return { year: chartYear, data: months };
-  }, [ledger, viewMode, selectedYear, today]);
-
-  const periodFiltered = useMemo(() => {
-    let rows = ledger;
-    if (periodRange.start) {
-      rows = rows.filter((r) => {
-        const d = new Date(r.date);
-        return d >= periodRange.start && d <= periodRange.end;
-      });
-    }
-    if (categoryFilter !== "All") rows = rows.filter((r) => r.category === categoryFilter);
-    return rows;
-  }, [ledger, periodRange, categoryFilter]);
+  const periodFiltered = useMemo(() => filterLedger(ledger, periodRange, categoryFilter), [ledger, periodRange, categoryFilter]);
 
   const allCategories = useMemo(() => {
     const set = new Set(ledger.map((r) => r.category));
@@ -177,7 +89,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit }) 
       <div className="gfc-stat-row">
         <div className="gfc-stat">
           <div className="gfc-stat-accent" style={{ background: T.indigo }} />
-          <div className="gfc-stat-label">Cash balance {isPastPeriod ? <span style={{ fontWeight: 400, textTransform: "none" }}>(as of {fmtDate(balanceCutoff)})</span> : <span style={{ fontWeight: 400, textTransform: "none" }}>(today)</span>}</div>
+          <div className="gfc-stat-label">Cash balance {isPastPeriodValue ? <span style={{ fontWeight: 400, textTransform: "none" }}>(as of {fmtDate(balanceCutoff)})</span> : <span style={{ fontWeight: 400, textTransform: "none" }}>(today)</span>}</div>
           <div className="gfc-stat-value gfc-mono">{fmtMoney(stats.balance)}</div>
         </div>
         <div className="gfc-stat">
