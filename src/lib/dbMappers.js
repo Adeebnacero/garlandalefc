@@ -28,7 +28,7 @@ export function fromDbPlayer(row) {
     statusLog: (row.player_status_log || []).map((s) => ({ id: s.id, status: s.status, changedAt: s.changed_at })),
     payments: (row.payments || [])
       .map((p) => ({ id: p.id, amount: Number(p.amount), date: p.date, method: p.method }))
-      .sort((a, b) => new Date(b.date) - new Date(a.date)),
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
   };
 }
 

@@ -63,7 +63,7 @@ export function generateStatementPDF(player, clubSettings) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(28, 23, 48);
-  const payments = [...(player.payments || [])].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const payments = [...(player.payments || [])].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   if (payments.length === 0) {
     y += 18;
     doc.setTextColor(90, 84, 112);

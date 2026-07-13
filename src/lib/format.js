@@ -12,7 +12,7 @@ export function fmtMoney(n) {
 export function fmtDate(d) {
   if (!d) return "—";
   const dt = new Date(d);
-  if (isNaN(dt)) return "—";
+  if (isNaN(dt.getTime())) return "—";
   return dt.toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" });
 }
 

@@ -87,7 +87,7 @@ export function extractGarlandaleFixtures(rows) {
 
   results.sort((a, b) => {
     if (!a.date || !b.date) return 0;
-    const d = a.date - b.date;
+    const d = a.date.getTime() - b.date.getTime();
     if (d !== 0) return d;
     return (a.time || "").localeCompare(b.time || "");
   });

@@ -28,10 +28,10 @@ function buildCombinedLedger(financeEntries, players) {
     }))
   );
 
-  return [...manual, ...subscriptionRows].sort((a, b) => new Date(b.date) - new Date(a.date));
+  return [...manual, ...subscriptionRows].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, onDelete }) {
+export function FinanceView({ financeEntries, players, assets, onAdd, onEdit }) {
   const [categoryFilter, setCategoryFilter] = useState("All");
 
   const today = useMemo(() => new Date(), []);
@@ -45,7 +45,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
     const years = new Set([today.getFullYear()]);
     ledger.forEach((r) => {
       const d = new Date(r.date);
-      if (!isNaN(d)) years.add(d.getFullYear());
+      if (!isNaN(d.getTime())) years.add(d.getFullYear());
     });
     return Array.from(years).sort((a, b) => b - a);
   }, [ledger, today]);
@@ -112,7 +112,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
     ledger.forEach((row) => {
       if (row.category === "Opening Balance") return;
       const d = new Date(row.date);
-      if (isNaN(d) || d.getFullYear() !== chartYear) return;
+      if (isNaN(d.getTime()) || d.getFullYear() !== chartYear) return;
       const bucket = months[d.getMonth()];
       if (row.type === "expense") bucket.expense += row.amount;
       else bucket.income += row.amount;

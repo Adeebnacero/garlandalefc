@@ -63,7 +63,7 @@ export function formatFixtureHeader(headerRaw) {
   }
   const parsed = new Date(datePart);
   let label;
-  if (!isNaN(parsed)) {
+  if (!isNaN(parsed.getTime())) {
     label = parsed
       .toLocaleDateString("en-ZA", { weekday: "long", day: "2-digit", month: "long", year: "numeric" })
       .toUpperCase();
@@ -326,7 +326,7 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
   );
 }
 
-function PosterPreviewFrame({ children }) {
+function PosterPreviewFrame({ children = null }) {
   const outerRef = React.useRef(null);
   const innerRef = React.useRef(null);
   const [scale, setScale] = useState(1);

@@ -23,7 +23,7 @@ export const SEASON_END_MONTH = 9;   // October (0-indexed) - last billable mont
 export function computeAgeGroup(dob, today = new Date()) {
   if (!dob) return "Unassigned";
   const birth = new Date(dob);
-  if (isNaN(birth)) return "Unassigned";
+  if (isNaN(birth.getTime())) return "Unassigned";
   // UTC getters throughout: date-only strings (dob, join dates) are parsed
   // as UTC by JS, so comparisons must stay in UTC terms too - mixing UTC
   // and local-time reads here caused real-world calendar-month bugs
@@ -39,7 +39,7 @@ export function computeAgeGroup(dob, today = new Date()) {
 export function computeExactAge(dob, today = new Date()) {
   if (!dob) return null;
   const birth = new Date(dob);
-  if (isNaN(birth)) return null;
+  if (isNaN(birth.getTime())) return null;
   let age = today.getUTCFullYear() - birth.getUTCFullYear();
   const hasHadBirthdayThisYear =
     today.getUTCMonth() > birth.getUTCMonth() ||
@@ -60,7 +60,7 @@ export function isOver40(dob, today = new Date()) {
  */
 export function yearsOfService(joinDate, today = new Date()) {
   const join = new Date(joinDate);
-  if (isNaN(join)) return "";
+  if (isNaN(join.getTime())) return "";
   let totalMonths = (today.getUTCFullYear() - join.getUTCFullYear()) * 12 + (today.getUTCMonth() - join.getUTCMonth());
   if (today.getUTCDate() < join.getUTCDate()) totalMonths -= 1;
   if (totalMonths < 0) return "Not yet started";
@@ -102,11 +102,11 @@ export function sortAgeGroups(groups) {
  */
 export function buildActiveSegments(joinDate, statusLog) {
   const join = new Date(joinDate);
-  if (isNaN(join)) return [];
+  if (isNaN(join.getTime())) return [];
   const sorted = [...(statusLog || [])]
     .map((s) => ({ status: s.status, at: new Date(s.changedAt) }))
-    .filter((s) => !isNaN(s.at))
-    .sort((a, b) => a.at - b.at);
+    .filter((s) => !isNaN(s.at.getTime()))
+    .sort((a, b) => a.at.getTime() - b.at.getTime());
 
   const segments = [];
   let cursor = join;
@@ -146,7 +146,7 @@ export function monthHasActiveOverlap(segments, monthStart, monthEnd) {
  */
 export function totalSeasonMonthsDue(joinDate, statusLog, today = new Date(), billingStartDate = null) {
   const effectiveStart = new Date(billingStartDate || joinDate);
-  if (isNaN(effectiveStart)) return 0;
+  if (isNaN(effectiveStart.getTime())) return 0;
   const segments = buildActiveSegments(joinDate, statusLog);
   const startYear = effectiveStart.getUTCFullYear();
   const startMonth = effectiveStart.getUTCMonth();

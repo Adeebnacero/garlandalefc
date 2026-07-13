@@ -50,6 +50,7 @@ export function SubscriptionsView({ enriched, tiers, includeInactive, setInclude
             Add players from the Squad tab to start tracking subscriptions.
           </div>
         ) : (
+          <div className="gfc-scroll-wrap">
           <table className="gfc-table">
             <thead>
               <tr>
@@ -80,6 +81,7 @@ export function SubscriptionsView({ enriched, tiers, includeInactive, setInclude
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>
@@ -99,7 +101,7 @@ export function LedgerModal({ player, onClose, onAddPayment, onRemovePayment, on
     setAmount(player.fee || "");
   }
 
-  const payments = [...(player.payments || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const payments = [...(player.payments || [])].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
     <div className="gfc-modal-backdrop" onClick={onClose}>
