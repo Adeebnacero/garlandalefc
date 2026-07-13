@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from "react";
+import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { T } from "../theme.js";
 import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
 
 const INCOME_CATEGORIES = ["Donation", "Sponsorship", "Fundraising", "Grant", "Opening Balance", "Other income"];
 const EXPENSE_CATEGORIES = ["Equipment", "Referee fees", "Ground hire", "Utilities", "Admin/bank fees", "Other expense"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /**
  * Builds one combined ledger from two sources:
@@ -32,28 +34,103 @@ function buildCombinedLedger(financeEntries, players) {
 export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, onDelete }) {
   const [categoryFilter, setCategoryFilter] = useState("All");
 
+  const today = useMemo(() => new Date(), []);
+  const [viewMode, setViewMode] = useState("month"); // "month" | "year" | "all"
+  const [selectedYear, setSelectedYear] = useState(today.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(today.getMonth()); // 0-11
+
   const ledger = useMemo(() => buildCombinedLedger(financeEntries, players), [financeEntries, players]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set([today.getFullYear()]);
+    ledger.forEach((r) => {
+      const d = new Date(r.date);
+      if (!isNaN(d)) years.add(d.getFullYear());
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [ledger, today]);
+
+  // The period currently being viewed, as [start, end] (end is inclusive,
+  // last instant of the period) - drives both the stat totals and which
+  // ledger rows are shown for "Month"/"Year" modes.
+  const periodRange = useMemo(() => {
+    if (viewMode === "month") {
+      const start = new Date(selectedYear, selectedMonth, 1);
+      const end = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59);
+      return { start, end };
+    }
+    if (viewMode === "year") {
+      const start = new Date(selectedYear, 0, 1);
+      const end = new Date(selectedYear, 11, 31, 23, 59, 59);
+      return { start, end };
+    }
+    return { start: null, end: null }; // "all"
+  }, [viewMode, selectedYear, selectedMonth]);
+
+  const periodLabel = useMemo(() => {
+    if (viewMode === "month") return `${MONTH_NAMES[selectedMonth]} ${selectedYear}`;
+    if (viewMode === "year") return `${selectedYear}`;
+    return "All time";
+  }, [viewMode, selectedYear, selectedMonth]);
+
+  // "As of" cutoff for the cash balance - the end of the selected period,
+  // or today if that period includes today (so looking at the current
+  // month/year still shows today's real balance, not an artificially
+  // earlier one).
+  const balanceCutoff = useMemo(() => {
+    if (!periodRange.end) return today;
+    return periodRange.end < today ? periodRange.end : today;
+  }, [periodRange, today]);
+
+  const isPastPeriod = periodRange.end && periodRange.end < today;
 
   const stats = useMemo(() => {
     let balance = 0;
     let totalIncome = 0;
     let totalExpense = 0;
     for (const row of ledger) {
+      const d = new Date(row.date);
       const signed = row.type === "expense" ? -row.amount : row.amount;
-      balance += signed;
-      if (row.category !== "Opening Balance") {
+      if (d <= balanceCutoff) balance += signed;
+
+      const withinPeriod = !periodRange.start || (d >= periodRange.start && d <= periodRange.end);
+      if (withinPeriod && row.category !== "Opening Balance") {
         if (row.type === "expense") totalExpense += row.amount;
         else totalIncome += row.amount;
       }
     }
     const assetsValue = (assets || []).reduce((s, a) => s + (Number(a.quantity) || 0) * (Number(a.unitValue) || 0), 0);
     return { balance, totalIncome, totalExpense, assetsValue, netWorth: balance + assetsValue };
-  }, [ledger, assets]);
+  }, [ledger, assets, balanceCutoff, periodRange]);
 
-  const filtered = useMemo(() => {
-    if (categoryFilter === "All") return ledger;
-    return ledger.filter((r) => r.category === categoryFilter);
-  }, [ledger, categoryFilter]);
+  // Monthly income/expense breakdown for whichever year is currently
+  // selected - shown regardless of Month/Year/All-time mode, since it's a
+  // "look at the shape of the year" view rather than a single-period total.
+  const monthlyChartData = useMemo(() => {
+    const chartYear = viewMode === "all" ? today.getFullYear() : selectedYear;
+    const months = MONTH_NAMES.map((name, i) => ({ month: name.slice(0, 3), income: 0, expense: 0, _i: i }));
+    ledger.forEach((row) => {
+      if (row.category === "Opening Balance") return;
+      const d = new Date(row.date);
+      if (isNaN(d) || d.getFullYear() !== chartYear) return;
+      const bucket = months[d.getMonth()];
+      if (row.type === "expense") bucket.expense += row.amount;
+      else bucket.income += row.amount;
+    });
+    return { year: chartYear, data: months };
+  }, [ledger, viewMode, selectedYear, today]);
+
+  const periodFiltered = useMemo(() => {
+    let rows = ledger;
+    if (periodRange.start) {
+      rows = rows.filter((r) => {
+        const d = new Date(r.date);
+        return d >= periodRange.start && d <= periodRange.end;
+      });
+    }
+    if (categoryFilter !== "All") rows = rows.filter((r) => r.category === categoryFilter);
+    return rows;
+  }, [ledger, periodRange, categoryFilter]);
 
   const allCategories = useMemo(() => {
     const set = new Set(ledger.map((r) => r.category));
@@ -70,25 +147,52 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
         <button className="gfc-btn gfc-btn-primary" onClick={onAdd}>+ Add entry</button>
       </div>
 
+      <div className="gfc-panel" style={{ padding: 14, marginBottom: 18, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {["month", "year", "all"].map((m) => (
+            <button
+              key={m}
+              className={`gfc-btn gfc-btn-sm ${viewMode === m ? "gfc-btn-primary" : "gfc-btn-outline"}`}
+              onClick={() => setViewMode(m)}
+            >
+              {m === "month" ? "Month" : m === "year" ? "Year" : "All time"}
+            </button>
+          ))}
+        </div>
+        {viewMode !== "all" && (
+          <select className="gfc-select" style={{ maxWidth: 110 }} value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
+            {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        )}
+        {viewMode === "month" && (
+          <select className="gfc-select" style={{ maxWidth: 150 }} value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))}>
+            {MONTH_NAMES.map((name, i) => <option key={name} value={i}>{name}</option>)}
+          </select>
+        )}
+        <div style={{ fontSize: 12, color: T.inkSoft, fontWeight: 600, marginLeft: "auto" }}>
+          Viewing: {periodLabel}
+        </div>
+      </div>
+
       <div className="gfc-stat-row">
         <div className="gfc-stat">
           <div className="gfc-stat-accent" style={{ background: T.indigo }} />
-          <div className="gfc-stat-label">Cash balance</div>
+          <div className="gfc-stat-label">Cash balance {isPastPeriod ? <span style={{ fontWeight: 400, textTransform: "none" }}>(as of {fmtDate(balanceCutoff)})</span> : <span style={{ fontWeight: 400, textTransform: "none" }}>(today)</span>}</div>
           <div className="gfc-stat-value gfc-mono">{fmtMoney(stats.balance)}</div>
         </div>
         <div className="gfc-stat">
           <div className="gfc-stat-accent" style={{ background: T.green }} />
-          <div className="gfc-stat-label">Total income</div>
+          <div className="gfc-stat-label">Income <span style={{ fontWeight: 400, textTransform: "none" }}>({periodLabel})</span></div>
           <div className="gfc-stat-value gfc-mono">{fmtMoney(stats.totalIncome)}</div>
         </div>
         <div className="gfc-stat">
           <div className="gfc-stat-accent" style={{ background: T.danger }} />
-          <div className="gfc-stat-label">Total expenses</div>
+          <div className="gfc-stat-label">Expenses <span style={{ fontWeight: 400, textTransform: "none" }}>({periodLabel})</span></div>
           <div className="gfc-stat-value gfc-mono">{fmtMoney(stats.totalExpense)}</div>
         </div>
         <div className="gfc-stat">
           <div className="gfc-stat-accent" style={{ background: T.goldDeep }} />
-          <div className="gfc-stat-label">Assets value</div>
+          <div className="gfc-stat-label">Assets value <span style={{ fontWeight: 400, textTransform: "none" }}>(today)</span></div>
           <div className="gfc-stat-value gfc-mono">{fmtMoney(stats.assetsValue)}</div>
         </div>
         <div className="gfc-stat">
@@ -98,9 +202,24 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
         </div>
       </div>
 
+      <div className="gfc-panel" style={{ padding: 16, marginBottom: 18 }}>
+        <div className="gfc-panel-title" style={{ marginBottom: 12 }}>Monthly breakdown — {monthlyChartData.year}</div>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={monthlyChartData.data} margin={{ top: 4, right: 8, left: -18, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={T.line} vertical={false} />
+            <XAxis dataKey="month" tick={{ fontSize: 11.5, fill: T.inkSoft }} axisLine={{ stroke: T.line }} tickLine={false} />
+            <YAxis tick={{ fontSize: 11.5, fill: T.inkSoft }} axisLine={false} tickLine={false} />
+            <Tooltip contentStyle={{ fontSize: 12.5, borderRadius: 8, border: `1px solid ${T.line}` }} formatter={(v) => fmtMoney(v)} />
+            <Legend wrapperStyle={{ fontSize: 11.5 }} />
+            <Bar dataKey="income" name="Income" fill={T.green} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="expense" name="Expenses" fill={T.danger} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
       <div className="gfc-panel">
         <div className="gfc-panel-head">
-          <div className="gfc-panel-title">Ledger ({filtered.length})</div>
+          <div className="gfc-panel-title">Ledger ({periodFiltered.length})</div>
           <div className="gfc-filters">
             <select className="gfc-select" style={{ maxWidth: 180 }} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
               <option value="All">All categories</option>
@@ -108,10 +227,10 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
             </select>
           </div>
         </div>
-        {filtered.length === 0 ? (
+        {periodFiltered.length === 0 ? (
           <div className="gfc-empty">
-            <div className="gfc-empty-title gfc-display">No entries yet</div>
-            Add your opening balance to get started, then log bank transactions, donations, and expenses as they happen.
+            <div className="gfc-empty-title gfc-display">No entries in this period</div>
+            {ledger.length === 0 ? "Add your opening balance to get started, then log bank transactions, donations, and expenses as they happen." : "Try a different month, year, or \"All time\"."}
           </div>
         ) : (
           <div className="gfc-scroll-wrap">
@@ -126,7 +245,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit, on
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
+              {periodFiltered.map((r) => (
                 <tr key={r.id} className={r.isSubscription ? "" : "clickable"} onClick={() => !r.isSubscription && onEdit(r)}>
                   <td>{fmtDate(r.date)}</td>
                   <td style={{ fontWeight: 600 }}>{r.description}</td>
