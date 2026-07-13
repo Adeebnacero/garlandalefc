@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { T } from "../theme.js";
 
-export function SettingsView({ clubSettings, onSave }) {
+export function SettingsView({ clubSettings, onSave, leagueSources, onAddLeagueSource, onEditLeagueSource }) {
   const [form, setForm] = useState(clubSettings);
   const [saved, setSaved] = useState("");
   const [saving, setSaving] = useState(false);
@@ -71,6 +71,87 @@ export function SettingsView({ clubSettings, onSave }) {
           {saved && <span style={{ fontSize: 12.5, color: saved.startsWith("Error") ? T.danger : T.green, fontWeight: 600 }}>{saved}</span>}
         </div>
       </form>
+
+      <div className="gfc-panel" style={{ padding: 20, marginTop: 18 }}>
+        <div className="gfc-panel-head" style={{ marginBottom: 4 }}>
+          <div className="gfc-panel-title">League table sources</div>
+          <button type="button" className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={onAddLeagueSource}>+ Add division</button>
+        </div>
+        <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 14 }}>
+          Public standings URLs from the federation's own site (LeagueRepublic), one per division Garlandale plays in. Fetched and refreshed automatically every Monday morning — shown on the Squad tab's League Table view.
+        </div>
+        {(!leagueSources || leagueSources.length === 0) ? (
+          <div className="gfc-empty">No divisions added yet.</div>
+        ) : (
+          <table className="gfc-table">
+            <thead><tr><th>Division</th><th>Last fetched</th><th></th><th></th></tr></thead>
+            <tbody>
+              {leagueSources.map((s) => (
+                <tr key={s.id}>
+                  <td style={{ fontWeight: 600 }}>{s.divisionLabel}</td>
+                  <td style={{ fontSize: 11.5, color: s.lastFetchError ? T.danger : T.inkSoft }}>
+                    {s.lastFetchError ? `Error: ${s.lastFetchError}` : s.lastFetchedAt ? new Date(s.lastFetchedAt).toLocaleString("en-ZA") : "Not yet fetched"}
+                  </td>
+                  <td><button type="button" className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={() => onEditLeagueSource(s)}>Edit</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function LeagueSourceModal({ source, onClose, onSave, onDelete }) {
+  const [form, setForm] = useState(() => ({
+    id: source?.id || "",
+    divisionLabel: source?.divisionLabel || "",
+    sourceUrl: source?.sourceUrl || "",
+    displayOrder: source?.displayOrder ?? 0,
+  }));
+
+  function update(field, value) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.divisionLabel.trim() || !form.sourceUrl.trim()) return;
+    onSave(form);
+  }
+
+  return (
+    <div className="gfc-modal-backdrop" onClick={onClose}>
+      <div className="gfc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="gfc-modal-head">
+          <div className="gfc-modal-title gfc-display">{source ? "Edit division" : "Add division"}</div>
+          <button className="gfc-modal-close" onClick={onClose}>×</button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="gfc-field">
+            <label className="gfc-label">Division label</label>
+            <input className="gfc-input" placeholder="e.g. Under 12 A" value={form.divisionLabel} onChange={(e) => update("divisionLabel", e.target.value)} required />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Standings URL</label>
+            <input className="gfc-input" placeholder="https://cttfass.leaguerepublic.com/standingsForDate/..." value={form.sourceUrl} onChange={(e) => update("sourceUrl", e.target.value)} required />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Display order <span style={{ fontWeight: 400, textTransform: "none", color: T.inkSoft }}>(lowest shows first)</span></label>
+            <input type="number" className="gfc-input" value={form.displayOrder} onChange={(e) => update("displayOrder", e.target.value)} />
+          </div>
+          <div className="gfc-modal-actions">
+            {source && (
+              <button type="button" className="gfc-btn gfc-btn-danger" style={{ marginRight: "auto" }} onClick={() => onDelete(source.id)}>
+                Remove division
+              </button>
+            )}
+            <button type="button" className="gfc-btn gfc-btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="gfc-btn gfc-btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

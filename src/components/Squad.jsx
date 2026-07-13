@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { T, STATUS_COLOR } from "../theme.js";
 import { computeAgeGroup, yearsOfService } from "../lib/billing.js";
 import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
+import { filterStatsByAgeGroup } from "../lib/playerStats.js";
 import { Badge, InactiveToggle } from "./shared.jsx";
 
 // For coaches, the badge shows a simplified compliance view (documents only,
@@ -15,9 +16,11 @@ function badgeProps(p, hideFinancials) {
   return { status: p.status, reason: p.reason };
 }
 
-export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter, setStatusFilter, search, setSearch, includeInactive, setIncludeInactive, role, onAdd, onEdit, onOpenLedger }) {
+export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, statusFilter, setStatusFilter, search, setSearch, includeInactive, setIncludeInactive, role, onAdd, onEdit, onOpenLedger, playerStats, leagueSources, leagueStandings }) {
   const hideFinancials = role === "coach";
-  const [viewMode, setViewMode] = useState("cards"); // 'cards' or 'list'
+  const [viewMode, setViewMode] = useState("cards"); // 'cards', 'list', or 'stats'
+
+  const filteredStats = useMemo(() => filterStatsByAgeGroup(playerStats, ageFilter), [playerStats, ageFilter]);
 
   return (
     <div>
@@ -91,10 +94,96 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
           >
             ☰ List
           </button>
+          <button
+            className="gfc-btn gfc-btn-sm"
+            style={{ background: viewMode === "stats" ? "#fff" : "transparent", color: T.ink, boxShadow: viewMode === "stats" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+            onClick={() => setViewMode("stats")}
+          >
+            🏆 Stats
+          </button>
+          <button
+            className="gfc-btn gfc-btn-sm"
+            style={{ background: viewMode === "league" ? "#fff" : "transparent", color: T.ink, boxShadow: viewMode === "league" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+            onClick={() => setViewMode("league")}
+          >
+            📊 League Table
+          </button>
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {viewMode === "league" ? (
+        <div>
+          {(!leagueSources || leagueSources.length === 0) ? (
+            <div className="gfc-panel">
+              <div className="gfc-empty">
+                <div className="gfc-empty-title gfc-display">No league tables set up</div>
+                Add the federation's standings URLs for each division in Settings.
+              </div>
+            </div>
+          ) : (
+            leagueSources.map((source) => {
+              const rows = (leagueStandings || []).filter((s) => s.sourceId === source.id);
+              return (
+                <div key={source.id} className="gfc-panel" style={{ marginBottom: 16 }}>
+                  <div className="gfc-panel-head"><div className="gfc-panel-title">{source.divisionLabel}</div></div>
+                  {rows.length === 0 ? (
+                    <div className="gfc-empty">Not fetched yet — check back after the next scheduled refresh.</div>
+                  ) : (
+                    <div className="gfc-scroll-wrap">
+                    <table className="gfc-table">
+                      <thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>F</th><th>A</th><th>+/-</th><th>Pts</th></tr></thead>
+                      <tbody>
+                        {rows.map((r) => (
+                          <tr key={r.id} style={r.isGarlandale ? { background: T.amberSoft, fontWeight: 700 } : undefined}>
+                            <td>{r.position}</td>
+                            <td>{r.teamName}</td>
+                            <td className="gfc-mono">{r.played}</td>
+                            <td className="gfc-mono">{r.won}</td>
+                            <td className="gfc-mono">{r.drawn}</td>
+                            <td className="gfc-mono">{r.lost}</td>
+                            <td className="gfc-mono">{r.goalsFor}</td>
+                            <td className="gfc-mono">{r.goalsAgainst}</td>
+                            <td className="gfc-mono">{r.goalDifference}</td>
+                            <td className="gfc-mono" style={{ fontWeight: 700 }}>{r.points}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : viewMode === "stats" ? (
+        <div className="gfc-panel">
+          <div className="gfc-panel-head"><div className="gfc-panel-title">Season stats{ageFilter !== "All" ? ` — ${ageFilter}` : ""} ({filteredStats.length})</div></div>
+          {filteredStats.length === 0 ? (
+            <div className="gfc-empty">
+              <div className="gfc-empty-title gfc-display">No stats recorded yet</div>
+              Goals and assists are entered per player on the Matchday tab after each game.
+            </div>
+          ) : (
+            <div className="gfc-scroll-wrap">
+            <table className="gfc-table">
+              <thead><tr><th>Player</th><th>Age group</th><th>Goals</th><th>Assists</th><th>G+A</th></tr></thead>
+              <tbody>
+                {filteredStats.map((s) => (
+                  <tr key={s.playerId}>
+                    <td style={{ fontWeight: 600 }}>{s.name}</td>
+                    <td><span className="gfc-agepill">{s.ageGroup}</span></td>
+                    <td className="gfc-mono">{s.goals}</td>
+                    <td className="gfc-mono">{s.assists}</td>
+                    <td className="gfc-mono" style={{ fontWeight: 700 }}>{s.goalContributions}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            </div>
+          )}
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="gfc-panel">
           <div className="gfc-empty">
             <div className="gfc-empty-title gfc-display">No players found</div>

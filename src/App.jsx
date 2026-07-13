@@ -18,9 +18,13 @@ import {
   toDbFinanceEntry,
   fromDbReminderBatch,
   fromDbAuditLog,
+  fromDbLeagueSource,
+  toDbLeagueSource,
+  fromDbLeagueStanding,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
 import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
+import { aggregatePlayerStats } from "./lib/playerStats.js";
 import { todayISO, fmtMoney, fmtDate, digitsOnly } from "./lib/format.js";
 import { waLink, smsLink, fillTemplate, TEMPLATES } from "./lib/messaging.js";
 import { extractFunctionErrorMessage } from "./lib/errors.js";
@@ -37,7 +41,7 @@ import { AssetsView, AssetModal } from "./components/Assets.jsx";
 import { FinanceView, FinanceEntryModal } from "./components/Finance.jsx";
 import { BackupsView } from "./components/Backups.jsx";
 import { FixturesPostView } from "./components/FixturesPost.jsx";
-import { SettingsView } from "./components/Settings.jsx";
+import { SettingsView, LeagueSourceModal } from "./components/Settings.jsx";
 import { UsersView } from "./components/Users.jsx";
 import { LoginView, AcceptInviteView, NoAccessView } from "./components/Auth.jsx";
 
@@ -49,13 +53,13 @@ const CLUB_NAME = "Garlandale FC";
 
 const CLUB_OPS_NAV = [
   { id: "dashboard", label: "Dashboard", icon: "◆", roles: ["admin", "treasurer"] },
-  { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
   { id: "subscriptions", label: "Subscriptions", icon: "$", roles: ["admin", "treasurer"] },
   { id: "finance", label: "Finance", icon: "🏦", roles: ["admin", "treasurer"] },
-  { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
-  { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
   { id: "assets", label: "Club Assets", icon: "📦", roles: ["admin", "coach"] },
   { id: "messages", label: "Messages", icon: "✉", roles: ["admin", "treasurer"] },
+  { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
+  { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
+  { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
 ];
 
 const ADMIN_NAV = [
@@ -100,6 +104,11 @@ function MainApp({ role, onLogout }) {
   const [pendingReminderBatch, setPendingReminderBatch] = useState(null);
 
   const [auditLog, setAuditLog] = useState([]);
+  const [allSquadRows, setAllSquadRows] = useState([]);
+
+  const [leagueSources, setLeagueSources] = useState([]);
+  const [leagueStandings, setLeagueStandings] = useState([]);
+  const [editingLeagueSource, setEditingLeagueSource] = useState(null); // source or "new" or null
 
   const [tiers, setTiers] = useState([]);
   const [editingTier, setEditingTier] = useState(null); // tier object or "new" or null
@@ -329,6 +338,8 @@ function MainApp({ role, onLogout }) {
           slotNo: r.slot_no,
           jerseyNo: r.jersey_no || "",
           role: r.role || "starting",
+          goals: r.goals ?? 0,
+          assists: r.assists ?? 0,
           player: r.players ? fromDbPlayer({ ...r.players, payments: [] }) : null,
         })),
       }));
@@ -417,6 +428,36 @@ function MainApp({ role, onLogout }) {
     }
   }, []);
 
+  const loadAllSquadStats = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("match_squad").select("player_id, goals, assists");
+      if (error) throw error;
+      setAllSquadRows((rows || []).map((r) => ({ playerId: r.player_id, goals: r.goals ?? 0, assists: r.assists ?? 0 })));
+    } catch (e) {
+      // Non-critical - season stats just won't show if this fails.
+    }
+  }, []);
+
+  const loadLeagueSources = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("league_table_sources").select("*").order("display_order");
+      if (error) throw error;
+      setLeagueSources((rows || []).map(fromDbLeagueSource));
+    } catch (e) {
+      // Non-critical - league table section just won't show if this fails.
+    }
+  }, []);
+
+  const loadLeagueStandings = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("league_standings").select("*").order("position");
+      if (error) throw error;
+      setLeagueStandings((rows || []).map(fromDbLeagueStanding));
+    } catch (e) {
+      // Non-critical - league table section just won't show if this fails.
+    }
+  }, []);
+
   useEffect(() => {
     loadPlayers();
     loadMatches();
@@ -430,7 +471,10 @@ function MainApp({ role, onLogout }) {
     loadFinanceEntries();
     loadReminderBatch();
     loadAuditLog();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog]);
+    loadAllSquadStats();
+    loadLeagueSources();
+    loadLeagueStandings();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -452,6 +496,8 @@ function MainApp({ role, onLogout }) {
       return { ...p, ...fin, status, reason, ageGroup, over40 };
     });
   }, [players, tiers]);
+
+  const playerStats = useMemo(() => aggregatePlayerStats(allSquadRows, enriched), [allSquadRows, enriched]);
 
   const visiblePlayers = useMemo(() => {
     return includeInactive ? enriched : enriched.filter((p) => p.active);
@@ -644,6 +690,22 @@ function MainApp({ role, onLogout }) {
     }
   }
 
+  async function updateSquadStats(matchId, rowId, field, value) {
+    setSaveError("");
+    const num = Math.max(0, Number(value) || 0);
+    try {
+      const { error } = await supabase.from("match_squad").update({ [field]: num }).eq("id", rowId);
+      if (error) throw error;
+      setMatchSquads((prev) => ({
+        ...prev,
+        [matchId]: (prev[matchId] || []).map((r) => (r.id === rowId ? { ...r, [field]: num } : r)),
+      }));
+      loadAllSquadStats();
+    } catch (e) {
+      setSaveError(e.message || "Something went wrong. Please try again.");
+    }
+  }
+
   /* ----- Tier CRUD ----- */
 
   async function saveTier(form) {
@@ -782,6 +844,37 @@ function MainApp({ role, onLogout }) {
     } catch (e) {
       setSaveError(e.message || "Could not dismiss the reminder banner.");
     }
+  }
+
+  async function saveLeagueSource(form) {
+    setSaveError("");
+    const payload = toDbLeagueSource(form);
+    try {
+      if (form.id) {
+        const { error } = await supabase.from("league_table_sources").update(payload).eq("id", form.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("league_table_sources").insert(payload);
+        if (error) throw error;
+      }
+      await loadLeagueSources();
+      setEditingLeagueSource(null);
+    } catch (e) {
+      setSaveError(e.message || "Something went wrong. Please try again.");
+    }
+  }
+
+  async function deleteLeagueSource(id) {
+    setSaveError("");
+    try {
+      const { error } = await supabase.from("league_table_sources").delete().eq("id", id);
+      if (error) throw error;
+      await loadLeagueSources();
+      await loadLeagueStandings();
+    } catch (e) {
+      setSaveError(e.message || "Something went wrong. Please try again.");
+    }
+    setEditingLeagueSource(null);
   }
 
   async function issueItem({ playerId, itemId, size, quantity, dateIssued, notes }) {
@@ -1080,6 +1173,9 @@ function MainApp({ role, onLogout }) {
             onAdd={() => setEditingPlayer("new")}
             onEdit={(p) => setEditingPlayer(p)}
             onOpenLedger={(p) => setLedgerPlayerId(p.id)}
+            playerStats={playerStats}
+            leagueSources={leagueSources}
+            leagueStandings={leagueStandings}
           />
         )}
 
@@ -1116,6 +1212,7 @@ function MainApp({ role, onLogout }) {
             onEditMatch={(m) => setEditingMatch(m)}
             onSetSlot={setSquadSlot}
             onUpdateJersey={updateSquadJersey}
+            onUpdateStats={updateSquadStats}
           />
         )}
 
@@ -1159,7 +1256,13 @@ function MainApp({ role, onLogout }) {
         )}
 
         {tab === "settings" && (
-          <SettingsView clubSettings={clubSettings} onSave={saveClubSettings} />
+          <SettingsView
+            clubSettings={clubSettings}
+            onSave={saveClubSettings}
+            leagueSources={leagueSources}
+            onAddLeagueSource={() => setEditingLeagueSource("new")}
+            onEditLeagueSource={(s) => setEditingLeagueSource(s)}
+          />
         )}
 
         {tab === "users" && (
@@ -1270,6 +1373,15 @@ function MainApp({ role, onLogout }) {
           onClose={() => setEditingFinanceEntry(null)}
           onSave={saveFinanceEntry}
           onDelete={deleteFinanceEntry}
+        />
+      )}
+
+      {editingLeagueSource && (
+        <LeagueSourceModal
+          source={editingLeagueSource === "new" ? null : editingLeagueSource}
+          onClose={() => setEditingLeagueSource(null)}
+          onSave={saveLeagueSource}
+          onDelete={deleteLeagueSource}
         />
       )}
     </div>

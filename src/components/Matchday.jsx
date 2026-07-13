@@ -3,7 +3,7 @@ import { T } from "../theme.js";
 import { fmtDate, todayISO } from "../lib/format.js";
 import { printTeamSheet } from "../lib/teamSheet.js";
 
-export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey }) {
+export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey, onUpdateStats }) {
   const activeMatch = matches.find((m) => m.id === activeMatchId) || null;
   const [rosterAgeFilter, setRosterAgeFilter] = useState("All");
 
@@ -41,6 +41,28 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
           value={row?.jerseyNo || ""}
           disabled={!row}
           onChange={(e) => row && onUpdateJersey(activeMatch.id, row.id, e.target.value)}
+        />
+        <input
+          type="number"
+          min="0"
+          className="gfc-input"
+          style={{ width: 48, textAlign: "center" }}
+          title="Goals scored"
+          placeholder="G"
+          value={row ? row.goals || "" : ""}
+          disabled={!row}
+          onChange={(e) => row && onUpdateStats(activeMatch.id, row.id, "goals", e.target.value)}
+        />
+        <input
+          type="number"
+          min="0"
+          className="gfc-input"
+          style={{ width: 48, textAlign: "center" }}
+          title="Assists"
+          placeholder="A"
+          value={row ? row.assists || "" : ""}
+          disabled={!row}
+          onChange={(e) => row && onUpdateStats(activeMatch.id, row.id, "assists", e.target.value)}
         />
       </div>
     );
@@ -110,6 +132,7 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
             <div className="gfc-row2">
               <div className="gfc-panel" style={{ padding: 16 }}>
                 <div className="gfc-panel-title" style={{ marginBottom: 10 }}>Starting XI</div>
+                <div style={{ fontSize: 11, color: T.inkSoft, marginBottom: 8 }}>No. = jersey number · G = goals · A = assists</div>
                 <div className="gfc-filters" style={{ marginBottom: 10 }}>
                   <select className="gfc-select" style={{ maxWidth: 160 }} value={rosterAgeFilter} onChange={(e) => setRosterAgeFilter(e.target.value)}>
                     {ageGroups.map((g) => <option key={g} value={g}>{g === "All" ? "All age groups" : g}</option>)}
@@ -169,6 +192,8 @@ export function MatchModal({ match, players, ageGroups, onClose, onSave, onDelet
     physioName: match?.physioName || "",
     physioRegNo: match?.physioRegNo || "",
     comments: match?.comments || "",
+    fullTimeScoreHome: match?.fullTimeScoreHome || "",
+    fullTimeScoreAway: match?.fullTimeScoreAway || "",
   }));
 
   function update(field, value) {
@@ -225,6 +250,17 @@ export function MatchModal({ match, players, ageGroups, onClose, onSave, onDelet
                 <option value="">Not set</option>
                 {ageGroups.filter((g) => g !== "All").map((g) => <option key={g} value={g}>{g}</option>)}
               </select>
+            </div>
+          </div>
+
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Full-time score — Garlandale</label>
+              <input type="number" min="0" className="gfc-input" placeholder="e.g. 3" value={form.homeAway === "H" ? form.fullTimeScoreHome : form.fullTimeScoreAway} onChange={(e) => update(form.homeAway === "H" ? "fullTimeScoreHome" : "fullTimeScoreAway", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Full-time score — {form.opponent || "Opponent"}</label>
+              <input type="number" min="0" className="gfc-input" placeholder="e.g. 1" value={form.homeAway === "H" ? form.fullTimeScoreAway : form.fullTimeScoreHome} onChange={(e) => update(form.homeAway === "H" ? "fullTimeScoreAway" : "fullTimeScoreHome", e.target.value)} />
             </div>
           </div>
 

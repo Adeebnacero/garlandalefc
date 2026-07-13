@@ -222,3 +222,40 @@ export function fromDbAuditLog(row) {
     changedAt: row.changed_at,
   };
 }
+
+export function fromDbLeagueSource(row) {
+  return {
+    id: row.id,
+    divisionLabel: row.division_label || "",
+    sourceUrl: row.source_url || "",
+    displayOrder: row.display_order ?? 0,
+    lastFetchedAt: row.last_fetched_at,
+    lastFetchError: row.last_fetch_error || "",
+  };
+}
+
+export function toDbLeagueSource(form) {
+  return {
+    division_label: form.divisionLabel || "",
+    source_url: form.sourceUrl || "",
+    display_order: Number(form.displayOrder) || 0,
+  };
+}
+
+export function fromDbLeagueStanding(row) {
+  return {
+    id: row.id,
+    sourceId: row.source_id,
+    position: row.position,
+    teamName: row.team_name || "",
+    played: row.played ?? 0,
+    won: row.won ?? 0,
+    drawn: row.drawn ?? 0,
+    lost: row.lost ?? 0,
+    goalsFor: row.goals_for ?? 0,
+    goalsAgainst: row.goals_against ?? 0,
+    goalDifference: row.goal_difference ?? 0,
+    points: row.points ?? 0,
+    isGarlandale: !!row.is_garlandale,
+  };
+}
