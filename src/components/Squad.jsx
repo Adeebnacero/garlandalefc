@@ -282,7 +282,7 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
 // Nothing else needs to change: the underlying user_id column,
 // current_player_id(), and the invite-player Edge Function all stay in
 // place either way.
-const PLAYER_APP_INVITE_ENABLED = false;
+const PLAYER_APP_INVITE_ENABLED = true;
 
 export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers, onInvitePlayer }) {
   const [form, setForm] = useState(() => ({
