@@ -259,3 +259,30 @@ export function fromDbLeagueStanding(row) {
     isGarlandale: !!row.is_garlandale,
   };
 }
+
+export function fromDbFixture(row) {
+  return {
+    id: row.id,
+    divisionKey: row.division_key || "",
+    teamLabel: row.team_label || "",
+    squadAgeGroup: row.squad_age_group || "",
+    opponent: row.opponent || "",
+    matchDate: row.match_date,
+    kickoffTime: row.kickoff_time || "",
+    venue: row.venue || "",
+    homeAway: row.home_away || "H",
+  };
+}
+
+export function toDbFixture(f) {
+  return {
+    division_key: f.divisionKey || "",
+    team_label: f.teamLabel || "",
+    squad_age_group: f.squadAgeGroup || "",
+    opponent: f.opponent || "",
+    match_date: f.matchDate,
+    kickoff_time: f.kickoffTime || null,
+    venue: f.venue || "",
+    home_away: f.homeAway === "A" ? "A" : "H",
+  };
+}

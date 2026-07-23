@@ -21,6 +21,8 @@ import {
   fromDbLeagueSource,
   toDbLeagueSource,
   fromDbLeagueStanding,
+  fromDbFixture,
+  toDbFixture,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
 import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
@@ -41,6 +43,7 @@ import { AssetsView, AssetModal } from "./components/Assets.jsx";
 import { FinanceView, FinanceEntryModal } from "./components/Finance.jsx";
 import { BackupsView } from "./components/Backups.jsx";
 import { FixturesPostView } from "./components/FixturesPost.jsx";
+import { FixturesView } from "./components/Fixtures.jsx";
 import { SettingsView, LeagueSourceModal } from "./components/Settings.jsx";
 import { UsersView } from "./components/Users.jsx";
 import { LoginView, AcceptInviteView, NoAccessView } from "./components/Auth.jsx";
@@ -59,6 +62,7 @@ const CLUB_OPS_NAV = [
   { id: "messages", label: "Messages", icon: "✉", roles: ["admin", "treasurer"] },
   { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
   { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
+  { id: "fixtures", label: "Fixtures", icon: "📋", roles: ["admin", "treasurer", "coach"] },
   { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
 ];
 
@@ -125,6 +129,7 @@ function MainApp({ role, onLogout }) {
   const [emailMessage, setEmailMessage] = useState("");
 
   const [divisionLabels, setDivisionLabels] = useState([]);
+  const [fixtures, setFixtures] = useState([]);
 
   const [staffList, setStaffList] = useState([]);
   const [usersBusy, setUsersBusy] = useState(false);
@@ -185,23 +190,52 @@ function MainApp({ role, onLogout }) {
     try {
       const { data: rows, error } = await supabase.from("division_labels").select("*").order("division_key");
       if (error) throw error;
-      setDivisionLabels((rows || []).map((r) => ({ id: r.id, divisionKey: r.division_key, teamLabel: r.team_label })));
+      setDivisionLabels((rows || []).map((r) => ({ id: r.id, divisionKey: r.division_key, teamLabel: r.team_label, squadAgeGroup: r.squad_age_group || "" })));
     } catch (e) {
       setLoadError((prev) => prev || e.message || "Could not load division labels.");
     }
   }, []);
 
-  async function saveDivisionLabel(divisionKey, teamLabel) {
+  async function saveDivisionLabel(divisionKey, teamLabel, squadAgeGroup) {
     try {
       const { error } = await supabase
         .from("division_labels")
-        .upsert({ division_key: divisionKey, team_label: teamLabel }, { onConflict: "division_key" });
+        .upsert({ division_key: divisionKey, team_label: teamLabel, squad_age_group: squadAgeGroup || "" }, { onConflict: "division_key" });
       if (error) throw error;
       await loadDivisionLabels();
       return null;
     } catch (e) {
       setSaveError(e.message || "Could not save that division label.");
       return e.message;
+    }
+  }
+
+  const loadFixtures = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("fixtures").select("*").order("match_date");
+      if (error) throw error;
+      setFixtures((rows || []).map(fromDbFixture));
+    } catch (e) {
+      setLoadError((prev) => prev || e.message || "Could not load fixtures.");
+    }
+  }, []);
+
+  // Upserts every imported row against the (opponent, match_date,
+  // division_key) unique constraint - re-importing an overlapping date
+  // range updates existing rows (in case a time/venue genuinely changed)
+  // rather than creating duplicates.
+  async function importFixtures(rows) {
+    if (!rows || rows.length === 0) return { success: true };
+    try {
+      const payload = rows.map((f) => ({ ...toDbFixture(f), updated_at: new Date().toISOString() }));
+      const { error } = await supabase
+        .from("fixtures")
+        .upsert(payload, { onConflict: "opponent,match_date,division_key" });
+      if (error) throw error;
+      await loadFixtures();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not import those fixtures." };
     }
   }
 
@@ -474,7 +508,8 @@ function MainApp({ role, onLogout }) {
     loadAllSquadStats();
     loadLeagueSources();
     loadLeagueStandings();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings]);
+    loadFixtures();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings, loadFixtures]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -1252,7 +1287,18 @@ function MainApp({ role, onLogout }) {
         )}
 
         {tab === "fixtures-post" && (
-          <FixturesPostView divisionLabels={divisionLabels} onSaveDivisionLabel={saveDivisionLabel} />
+          <FixturesPostView fixtures={fixtures} />
+        )}
+
+        {tab === "fixtures" && (
+          <FixturesView
+            fixtures={fixtures}
+            divisionLabels={divisionLabels}
+            role={role}
+            ageGroups={ageGroups}
+            onImportFixtures={importFixtures}
+            onSaveDivisionLabel={saveDivisionLabel}
+          />
         )}
 
         {tab === "settings" && (

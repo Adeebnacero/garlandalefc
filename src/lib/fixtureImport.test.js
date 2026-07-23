@@ -5,7 +5,7 @@ import {
   extractGarlandaleFixtures,
   findUnmappedDivisions,
   groupFixturesByDate,
-  buildFixtureTextFromImport,
+  formatDisplayTime,
   fmtImportDateHeader,
 } from "./fixtureImport.js";
 
@@ -76,9 +76,9 @@ describe("extractGarlandaleFixtures", () => {
     expect(row.date.getUTCDate()).toBe(18);
   });
 
-  it("formats 24-hour times as '08h15' style", () => {
+  it("parses times into a raw 'HH:MM' value, ready for storage", () => {
     const row = fixtures.find((f) => f.opponent === "Green Point Salesians");
-    expect(row.time).toBe("08h15");
+    expect(row.time).toBe("08:15");
   });
 
   it("uses the Pitch field as the venue (matches the club's own reference document)", () => {
@@ -124,6 +124,18 @@ describe("findUnmappedDivisions", () => {
   });
 });
 
+describe("formatDisplayTime", () => {
+  it("formats a stored 'HH:MM' value as '08h15' style for display", () => {
+    expect(formatDisplayTime("08:15")).toBe("08h15");
+    expect(formatDisplayTime("14:00")).toBe("14h00");
+  });
+
+  it("returns an empty string for a missing time", () => {
+    expect(formatDisplayTime(null)).toBe("");
+    expect(formatDisplayTime("")).toBe("");
+  });
+});
+
 describe("fmtImportDateHeader", () => {
   it("formats a date as '18 July 2026' regardless of local timezone", () => {
     const date = new Date(Date.UTC(2026, 6, 18));
@@ -135,33 +147,12 @@ describe("fmtImportDateHeader", () => {
   });
 });
 
-describe("groupFixturesByDate + buildFixtureTextFromImport - full pipeline", () => {
+describe("groupFixturesByDate", () => {
   const fixtures = extractGarlandaleFixtures(SAMPLE_ROWS);
-  const divisionLabelMap = {
-    "O3 - Under 12 Premier Three": "Under 12 'A'",
-    "O8- Under 12 Division Seven": "Under 12 'B'",
-    "D4 - 6th Division": "1st Team",
-    "F2 - Vets 040 B": "Over 40",
-  };
 
   it("groups all same-day fixtures into one group", () => {
     const groups = groupFixturesByDate(fixtures);
     expect(groups).toHaveLength(1); // all 4 remaining fixtures are on 18 July
     expect(groups[0].rows).toHaveLength(4);
-  });
-
-  it("produces text that matches the exact format the poster/PDF parser expects", () => {
-    const text = buildFixtureTextFromImport(fixtures, divisionLabelMap);
-    const lines = text.split("\n");
-    expect(lines[0]).toBe("18 July 2026");
-    expect(lines).toContain("Under 12 'A' vs Green Point Salesians | 08h15 | Garlandale A");
-    expect(lines).toContain("Under 12 'B' vs Lansdowne | 08h15 | Chukker Road A");
-    expect(lines).toContain("1st Team vs Sunningdale City | 14h00 | Garlandale A");
-    expect(lines).toContain("Over 40 vs Saxon Rovers | 15h45 | Garlandale B");
-  });
-
-  it("falls back to the raw division text for anything not yet mapped", () => {
-    const text = buildFixtureTextFromImport(fixtures, {});
-    expect(text).toContain("O3 - Under 12 Premier Three vs Green Point Salesians");
   });
 });

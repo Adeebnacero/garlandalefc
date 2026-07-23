@@ -3,55 +3,8 @@ import html2canvas from "html2canvas";
 import { T } from "../theme.js";
 import { todayISO } from "../lib/format.js";
 import BADGE_SRC from "../assets/badge.png";
-import {
-  parseFederationWorkbook,
-  extractGarlandaleFixtures,
-  findUnmappedDivisions,
-  buildFixtureTextFromImport,
-} from "../lib/fixtureImport.js";
+import { fmtImportDateHeader, formatDisplayTime, groupFixturesByDate } from "../lib/fixtureImport.js";
 import { downloadFixturesPdf } from "../lib/fixturePdf.js";
-
-export const FIXTURE_TEXT_PLACEHOLDER = `29 April 2026
-GFC Reserves vs Barmsley Spurs | 19h00 | Hickory Rd
-GFC 1st Team vs Barmsley Spurs | 20h30 | Hickory Rd
-
-01 May 2026
-GFC Over 40 vs Sunningdale | 19h00 | Sunningdale
-
-02 May 2026 - Fish Hoek
-GFC Under 7 vs Fish Hoek | 08h30 | Minis 1
-GFC Under 8 vs Fish Hoek | 08h30 | Minis 2`;
-
-export function parseFixtureText(text) {
-  const lines = text.split("\n").map((l) => l.trim());
-  const groups = [];
-  let current = null;
-  for (const line of lines) {
-    if (!line) continue;
-    if (line.includes("|")) {
-      if (!current) {
-        current = { headerRaw: "Fixtures", rows: [] };
-        groups.push(current);
-      }
-      const parts = line.split("|").map((p) => p.trim());
-      const matchup = parts[0] || "";
-      const time = parts[1] || "";
-      const venue = parts[2] || "";
-      let team = matchup;
-      let vs = "";
-      const vsMatch = matchup.match(/^(.*?)\s+vs\.?\s+(.*)$/i);
-      if (vsMatch) {
-        team = vsMatch[1].trim();
-        vs = vsMatch[2].trim();
-      }
-      current.rows.push({ team, vs, time, venue });
-    } else {
-      current = { headerRaw: line, rows: [] };
-      groups.push(current);
-    }
-  }
-  return groups;
-}
 
 export function formatFixtureHeader(headerRaw) {
   let datePart = headerRaw;
@@ -73,25 +26,28 @@ export function formatFixtureHeader(headerRaw) {
   return suffix ? `${label} – ${suffix.toUpperCase()}` : label;
 }
 
-function cleanDivisionGuess(text) {
-  return String(text || "").replace(/^[A-Za-z0-9]+\s*-\s*/, "").trim();
+/** Builds the {headerRaw, rows} shape the poster/PDF already understand, from a plain list of selected fixture rows (see src/lib/dbMappers.js:fromDbFixture). */
+export function buildGroupsFromFixtures(selectedFixtures) {
+  const asDates = selectedFixtures.map((f) => ({ ...f, date: new Date(f.matchDate + "T00:00:00Z") }));
+  const dateGroups = groupFixturesByDate(asDates);
+  return dateGroups.map((g) => ({
+    headerRaw: fmtImportDateHeader(g.date) || "Unknown date",
+    rows: g.rows.map((f) => ({
+      team: f.squadAgeGroup || f.teamLabel || f.divisionKey,
+      vs: f.opponent,
+      time: formatDisplayTime(f.kickoffTime),
+      venue: f.venue,
+    })),
+  }));
 }
 
-export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
-  const [rawText, setRawText] = useState(FIXTURE_TEXT_PLACEHOLDER);
+export function FixturesPostView({ fixtures }) {
   const [dateRangeLabel, setDateRangeLabel] = useState("29 APRIL – 02 MAY 2026");
   const [handle, setHandle] = useState("@GARLANDALEFC");
   const [hashtag, setHashtag] = useState("#WEAREGARLANDALE");
   const [downloading, setDownloading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const posterRef = React.useRef(null);
-  const fileInputRef = React.useRef(null);
-
-  const [importBusy, setImportBusy] = useState(false);
-  const [importMessage, setImportMessage] = useState("");
-  const [pendingUnmapped, setPendingUnmapped] = useState([]); // divisions awaiting a label
-  const [pendingLabels, setPendingLabels] = useState({}); // division -> typed label, while confirming
-  const [pendingFixtures, setPendingFixtures] = useState(null); // parsed fixtures awaiting label confirmation
 
   const [footerNotice1, setFooterNotice1] = useState("PLEASE BRING YOUR SHINGUARDS!");
   const [footerNotice2, setFooterNotice2] = useState("PLEASE REPORT 1 HOUR BEFORE YOUR GAME!");
@@ -104,64 +60,36 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
     [tuckshopText]
   );
 
-  const divisionLabelMap = useMemo(() => {
-    const map = {};
-    (divisionLabels || []).forEach((d) => { map[d.divisionKey] = d.teamLabel; });
-    return map;
-  }, [divisionLabels]);
+  // Only upcoming fixtures are worth putting on a poster - the Fixtures tab
+  // is where the full history/all-time list lives.
+  const upcoming = useMemo(() => {
+    const today = todayISO();
+    return (fixtures || [])
+      .filter((f) => f.matchDate >= today)
+      .sort((a, b) => (a.matchDate + (a.kickoffTime || "")).localeCompare(b.matchDate + (b.kickoffTime || "")));
+  }, [fixtures]);
 
-  const groups = useMemo(() => parseFixtureText(rawText), [rawText]);
+  // Checked by default - the Treasurer deselects anything that shouldn't
+  // appear on this particular week's poster, rather than opting each one in.
+  const [selectedIds, setSelectedIds] = useState(() => new Set(upcoming.map((f) => f.id)));
+  useEffect(() => {
+    setSelectedIds(new Set(upcoming.map((f) => f.id)));
+  }, [fixtures]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleFileSelected(e) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setImportBusy(true);
-    setImportMessage("");
-    setPendingUnmapped([]);
-    try {
-      const buffer = await file.arrayBuffer();
-      const rows = parseFederationWorkbook(buffer);
-      const fixtures = extractGarlandaleFixtures(rows);
-      if (fixtures.length === 0) {
-        setImportMessage("No Garlandale fixtures found in that file — double check it's the right spreadsheet.");
-        setImportBusy(false);
-        return;
-      }
-      const unmapped = findUnmappedDivisions(fixtures, divisionLabelMap);
-      if (unmapped.length > 0) {
-        setPendingUnmapped(unmapped);
-        setPendingFixtures(fixtures);
-        const guesses = {};
-        unmapped.forEach((d) => { guesses[d] = cleanDivisionGuess(d); });
-        setPendingLabels(guesses);
-        setImportMessage(`Found ${fixtures.length} fixture${fixtures.length === 1 ? "" : "s"}. A few divisions need a friendly name before continuing.`);
-      } else {
-        setImportMessage(`Found ${fixtures.length} fixture${fixtures.length === 1 ? "" : "s"}. Applied to the fixture list below.`);
-        setRawText(buildFixtureTextFromImport(fixtures, divisionLabelMap));
-      }
-    } catch (err) {
-      setImportMessage("Could not read that file — make sure it's the federation's .xls/.xlsx fixture sheet.");
-    } finally {
-      setImportBusy(false);
-    }
+  function toggleFixture(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   }
 
-  async function handleConfirmUnmapped() {
-    setImportBusy(true);
-    try {
-      for (const division of pendingUnmapped) {
-        const label = (pendingLabels[division] || "").trim();
-        if (label) await onSaveDivisionLabel(division, label);
-      }
-      const newMap = { ...divisionLabelMap, ...pendingLabels };
-      setRawText(buildFixtureTextFromImport(pendingFixtures, newMap));
-      setPendingUnmapped([]);
-      setImportMessage(`Applied ${pendingFixtures.length} fixture${pendingFixtures.length === 1 ? "" : "s"} to the list below.`);
-    } finally {
-      setImportBusy(false);
-    }
-  }
+  function selectAll() { setSelectedIds(new Set(upcoming.map((f) => f.id))); }
+  function selectNone() { setSelectedIds(new Set()); }
+
+  const selectedFixtures = useMemo(() => upcoming.filter((f) => selectedIds.has(f.id)), [upcoming, selectedIds]);
+  const groups = useMemo(() => buildGroupsFromFixtures(selectedFixtures), [selectedFixtures]);
+  const upcomingByDate = useMemo(() => groupFixturesByDate(upcoming.map((f) => ({ ...f, date: new Date(f.matchDate + "T00:00:00Z") }))), [upcoming]);
 
   function handleDownloadPdf() {
     if (groups.length === 0) return;
@@ -203,7 +131,7 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
       <div className="gfc-topbar">
         <div>
           <div className="gfc-page-title gfc-display">Fixtures Post</div>
-          <div className="gfc-page-sub">Import this week's fixtures, preview the poster, download for Instagram</div>
+          <div className="gfc-page-sub">Select this week's fixtures, preview the poster, download for Instagram</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {groups.length > 0 && (
@@ -217,58 +145,43 @@ export function FixturesPostView({ divisionLabels, onSaveDivisionLabel }) {
         </div>
       </div>
 
-      <div className="gfc-panel" style={{ padding: 16, marginBottom: 18 }}>
-        <div className="gfc-panel-title" style={{ marginBottom: 10 }}>Import from federation spreadsheet</div>
-        <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 10 }}>
-          Upload the federation's fixture spreadsheet (.xls or .xlsx) — every Garlandale match across every division gets pulled out automatically and applied to the fixture list below.
-        </div>
-        <input ref={fileInputRef} type="file" accept=".xls,.xlsx" onChange={handleFileSelected} style={{ display: "none" }} />
-        <button className="gfc-btn gfc-btn-outline" onClick={() => fileInputRef.current?.click()} disabled={importBusy}>
-          {importBusy ? "Working…" : "Choose spreadsheet…"}
-        </button>
-        {importMessage && (
-          <div style={{ marginTop: 10, fontSize: 12.5, color: T.inkSoft, fontWeight: 600 }}>{importMessage}</div>
-        )}
-
-        {pendingUnmapped.length > 0 && (
-          <div style={{ marginTop: 14, background: T.amberSoft, border: `1px solid ${T.gold}`, borderRadius: 8, padding: 14 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: "#7a5410", marginBottom: 10 }}>
-              New division{pendingUnmapped.length === 1 ? "" : "s"} found — what should {pendingUnmapped.length === 1 ? "this show as" : "these show as"}? (remembered for next time)
-            </div>
-            {pendingUnmapped.map((division) => (
-              <div key={division} className="gfc-field" style={{ marginBottom: 8 }}>
-                <label className="gfc-label" style={{ fontWeight: 400, textTransform: "none", fontSize: 11.5 }}>{division}</label>
-                <input
-                  className="gfc-input"
-                  value={pendingLabels[division] || ""}
-                  onChange={(e) => setPendingLabels((prev) => ({ ...prev, [division]: e.target.value }))}
-                />
-              </div>
-            ))}
-            <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={handleConfirmUnmapped} disabled={importBusy}>
-              Save &amp; apply to fixture list
-            </button>
-          </div>
-        )}
-      </div>
-
       <div className="gfc-row2" style={{ gridTemplateColumns: "380px 1fr", alignItems: "flex-start" }}>
         <div className="gfc-panel" style={{ padding: 16 }}>
-          <div className="gfc-panel-title" style={{ marginBottom: 10 }}>Fixture list</div>
-          <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>
-            One line per date (starts a new green banner), then fixture lines under it as:
-            <br /><code className="gfc-mono">Team vs Opponent | Time | Venue</code>
-            <br />Add "- Location" after a date to show a location suffix, e.g. <code className="gfc-mono">02 May 2026 - Fish Hoek</code>.
+          <div className="gfc-panel-head" style={{ marginBottom: 8 }}>
+            <div className="gfc-panel-title">Select fixtures ({selectedFixtures.length}/{upcoming.length})</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" className="gfc-btn gfc-btn-ghost gfc-btn-sm" onClick={selectAll}>All</button>
+              <button type="button" className="gfc-btn gfc-btn-ghost gfc-btn-sm" onClick={selectNone}>None</button>
+            </div>
           </div>
-          <textarea
-            className="gfc-textarea"
-            style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, minHeight: 260 }}
-            rows={16}
-            value={rawText}
-            onChange={(e) => setRawText(e.target.value)}
-          />
+          {upcoming.length === 0 ? (
+            <div className="gfc-empty">
+              No upcoming fixtures. Import the federation's spreadsheet in the <strong>Fixtures</strong> tab first.
+            </div>
+          ) : (
+            <div className="gfc-checklist" style={{ marginBottom: 14 }}>
+              {upcomingByDate.map((group) => (
+                <div key={group.date.toISOString()}>
+                  <div style={{ background: T.paperDim, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: T.inkSoft, textTransform: "uppercase" }}>
+                    {fmtImportDateHeader(group.date)}
+                  </div>
+                  {group.rows.map((f) => (
+                    <label key={f.id} className="gfc-checklist-row" style={{ cursor: "pointer" }}>
+                      <span className="gfc-checklist-left">
+                        <input type="checkbox" checked={selectedIds.has(f.id)} onChange={() => toggleFixture(f.id)} />
+                        <span>
+                          <strong>{f.squadAgeGroup || f.teamLabel || f.divisionKey}</strong> vs {f.opponent}
+                          <span style={{ color: T.inkSoft }}> — {formatDisplayTime(f.kickoffTime)}{f.venue ? `, ${f.venue}` : ""}</span>
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
 
-          <div className="gfc-field" style={{ marginTop: 14 }}>
+          <div className="gfc-field">
             <label className="gfc-label">Date range subtitle</label>
             <input className="gfc-input" value={dateRangeLabel} onChange={(e) => setDateRangeLabel(e.target.value)} />
           </div>
@@ -408,7 +321,7 @@ function FixturePoster({ groups, dateRangeLabel, handle, hashtag, tuckshopItems 
       <div style={{ flex: 1, position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: 22 }}>
         {groups.length === 0 && (
           <div style={{ color: "#fff", opacity: 0.6, fontSize: 16, padding: 20 }}>
-            Paste fixtures on the left to see them appear here.
+            Select fixtures on the left to see them appear here.
           </div>
         )}
         {groups.map((g, gi) => (
