@@ -242,7 +242,7 @@ function MainApp({ role, onLogout }) {
   async function invitePlayer(playerId, email) {
     try {
       const { data, error } = await supabase.functions.invoke("invite-player", {
-        body: { playerId, email, redirectTo: window.location.origin },
+        body: { playerId, email, redirectTo: "https://garlandale-player-app.vercel.app/accept-invite.html" },
       });
       if (error || data?.error) {
         const msg = await extractFunctionErrorMessage(error, data);
