@@ -3,9 +3,49 @@ import { T } from "../theme.js";
 import { fmtDate, todayISO } from "../lib/format.js";
 import { printTeamSheet } from "../lib/teamSheet.js";
 
-export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey, onUpdateStats }) {
+export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey, onUpdateStats, fixtures, onSyncFixtures }) {
   const activeMatch = matches.find((m) => m.id === activeMatchId) || null;
   const [rosterAgeFilter, setRosterAgeFilter] = useState("All");
+
+  const [windowDays, setWindowDays] = useState(7);
+  const [selectedFixtureIds, setSelectedFixtureIds] = useState(() => new Set());
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+
+  const linkedFixtureIds = useMemo(() => new Set(matches.map((m) => m.fixtureId).filter(Boolean)), [matches]);
+
+  const eligibleFixtures = useMemo(() => {
+    const today = todayISO();
+    const cutoff = windowDays === 0 ? null : new Date(Date.now() + windowDays * 86400000).toISOString().slice(0, 10);
+    return (fixtures || [])
+      .filter((f) => f.matchDate >= today && (!cutoff || f.matchDate <= cutoff))
+      .sort((a, b) => (a.matchDate + (a.kickoffTime || "")).localeCompare(b.matchDate + (b.kickoffTime || "")));
+  }, [fixtures, windowDays]);
+
+  function toggleFixture(id) {
+    setSelectedFixtureIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleSync() {
+    if (selectedFixtureIds.size === 0) return;
+    setSyncBusy(true);
+    setSyncMessage("");
+    const result = await onSyncFixtures(Array.from(selectedFixtureIds));
+    if (result?.error) {
+      setSyncMessage(result.error);
+    } else {
+      const parts = [];
+      if (result.created) parts.push(`${result.created} created`);
+      if (result.updated) parts.push(`${result.updated} updated`);
+      setSyncMessage(parts.length ? `Done — ${parts.join(", ")}.` : "No changes made.");
+      setSelectedFixtureIds(new Set());
+    }
+    setSyncBusy(false);
+  }
 
   const rosterPool = useMemo(() => {
     return enriched.filter((p) => rosterAgeFilter === "All" || p.ageGroup === rosterAgeFilter);
@@ -76,6 +116,48 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
           <div className="gfc-page-sub">Build your squad and print the official team sheet</div>
         </div>
         <button className="gfc-btn gfc-btn-primary" onClick={onAddMatch}>+ New fixture</button>
+      </div>
+
+      <div className="gfc-panel" style={{ padding: 16, marginBottom: 18 }}>
+        <div className="gfc-panel-head" style={{ marginBottom: 8 }}>
+          <div className="gfc-panel-title">Create from Fixtures</div>
+          <select className="gfc-select" style={{ maxWidth: 160 }} value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
+            <option value={7}>Next 7 days</option>
+            <option value={14}>Next 14 days</option>
+            <option value={30}>Next 30 days</option>
+            <option value={0}>All upcoming</option>
+          </select>
+        </div>
+        <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 10 }}>
+          Select fixtures to create a Matchday entry (or refresh one that already exists) — opponent, date, time, venue, and age group are filled in automatically; everything else stays blank for you to complete, same as adding one manually.
+        </div>
+        {eligibleFixtures.length === 0 ? (
+          <div className="gfc-empty">No fixtures in this window. Import them in the Fixtures tab, or widen the window above.</div>
+        ) : (
+          <>
+            <div className="gfc-checklist" style={{ marginBottom: 10 }}>
+              {eligibleFixtures.map((f) => (
+                <label key={f.id} className="gfc-checklist-row" style={{ cursor: "pointer" }}>
+                  <span className="gfc-checklist-left">
+                    <input type="checkbox" checked={selectedFixtureIds.has(f.id)} onChange={() => toggleFixture(f.id)} />
+                    <span>
+                      {fmtDate(f.matchDate)} — <strong>{f.squadAgeGroup || f.teamLabel || f.divisionKey}</strong> vs {f.opponent}
+                    </span>
+                  </span>
+                  {linkedFixtureIds.has(f.id) ? (
+                    <span style={{ fontSize: 11, color: T.inkSoft }}>Already linked — will refresh</span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: T.green, fontWeight: 700 }}>New</span>
+                  )}
+                </label>
+              ))}
+            </div>
+            <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={handleSync} disabled={syncBusy || selectedFixtureIds.size === 0}>
+              {syncBusy ? "Working…" : `Create/update ${selectedFixtureIds.size || ""} selected`}
+            </button>
+            {syncMessage && <span style={{ marginLeft: 10, fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>{syncMessage}</span>}
+          </>
+        )}
       </div>
 
       <div className="gfc-row2" style={{ alignItems: "flex-start", gridTemplateColumns: "260px 1fr" }}>

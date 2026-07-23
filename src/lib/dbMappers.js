@@ -82,6 +82,7 @@ export function fromDbMatch(row) {
     division: row.division || "",
     competition: row.competition || "",
     ageGroup: row.age_group || "",
+    fixtureId: row.fixture_id || "",
     cornerFlags: row.corner_flags || "",
     fieldConditions: row.field_conditions || "",
     fieldMarking: row.field_marking || "",

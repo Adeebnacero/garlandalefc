@@ -239,6 +239,46 @@ function MainApp({ role, onLogout }) {
     }
   }
 
+  // Creates a skeleton Matchday entry for each selected fixture that
+  // doesn't already have one (opponent/date/time/venue/home-away/age-group
+  // only - referee, coach, captain, comments, squad selections all stay
+  // blank, exactly like starting a match manually). For a fixture that
+  // already has a linked entry (matches.fixture_id), only those same basic
+  // fields are refreshed - nothing else on the existing entry is touched.
+  async function syncFixturesToMatchday(fixtureIds) {
+    setSaveError("");
+    try {
+      const selected = fixtures.filter((f) => fixtureIds.includes(f.id));
+      let created = 0;
+      let updated = 0;
+      for (const f of selected) {
+        const existing = matches.find((m) => m.fixtureId === f.id);
+        const basicFields = {
+          opponent: f.opponent,
+          match_date: f.matchDate,
+          kickoff_time: f.kickoffTime || null,
+          venue: f.venue || "",
+          home_away: f.homeAway || "H",
+          age_group: f.squadAgeGroup || "",
+          division: f.divisionKey || "",
+        };
+        if (existing) {
+          const { error } = await supabase.from("matches").update(basicFields).eq("id", existing.id);
+          if (error) throw error;
+          updated++;
+        } else {
+          const { error } = await supabase.from("matches").insert({ ...basicFields, fixture_id: f.id });
+          if (error) throw error;
+          created++;
+        }
+      }
+      await loadMatches();
+      return { success: true, created, updated };
+    } catch (e) {
+      return { error: e.message || "Could not sync those fixtures to Matchday." };
+    }
+  }
+
   const loadStaffList = useCallback(async () => {
     try {
       const { data: rows, error } = await supabase.from("staff").select("*").order("invited_at", { ascending: false });
@@ -1248,6 +1288,8 @@ function MainApp({ role, onLogout }) {
             onSetSlot={setSquadSlot}
             onUpdateJersey={updateSquadJersey}
             onUpdateStats={updateSquadStats}
+            fixtures={fixtures}
+            onSyncFixtures={syncFixturesToMatchday}
           />
         )}
 
