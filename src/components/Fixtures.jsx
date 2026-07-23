@@ -12,9 +12,10 @@ function cleanDivisionGuess(text) {
   return String(text || "").replace(/^[A-Za-z0-9]+\s*-\s*/, "").trim();
 }
 
-export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImportFixtures, onSaveDivisionLabel }) {
+export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImportFixtures, onSaveDivisionLabel, onSaveFixture, onDeleteFixture }) {
   const canImport = role === "admin" || role === "treasurer";
   const fileInputRef = useRef(null);
+  const [editingFixture, setEditingFixture] = useState(null); // fixture row, or "new", or null
 
   const [importBusy, setImportBusy] = useState(false);
   const [importMessage, setImportMessage] = useState("");
@@ -208,12 +209,15 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
               <option value="All">All teams</option>
               {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+            {canImport && (
+              <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={() => setEditingFixture("new")}>+ Add fixture</button>
+            )}
           </div>
         </div>
         {filtered.length === 0 ? (
           <div className="gfc-empty">
             <div className="gfc-empty-title gfc-display">No fixtures{dateFilter === "upcoming" ? " upcoming" : ""}</div>
-            {canImport ? "Import the federation's spreadsheet above to get started." : "Ask an Admin or Treasurer to import the federation's spreadsheet."}
+            {canImport ? "Import the federation's spreadsheet above, or add one manually." : "Ask an Admin or Treasurer to import the federation's spreadsheet."}
           </div>
         ) : (
           <div className="gfc-scroll-wrap">
@@ -226,23 +230,131 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
                 <th>Opponent</th>
                 <th>Venue</th>
                 <th>H/A</th>
+                {canImport && <th></th>}
               </tr>
             </thead>
             <tbody>
               {filtered.map((f) => (
-                <tr key={f.id}>
+                <tr key={f.id} className={canImport ? "clickable" : ""} onClick={() => canImport && setEditingFixture(f)}>
                   <td>{fmtDate(f.matchDate)}</td>
                   <td className="gfc-mono">{formatDisplayTime(f.kickoffTime)}</td>
                   <td style={{ fontWeight: 600 }}>{f.squadAgeGroup || f.teamLabel || f.divisionKey}</td>
                   <td>{f.opponent}</td>
                   <td>{f.venue}</td>
                   <td>{f.homeAway}</td>
+                  {canImport && (
+                    <td><button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); setEditingFixture(f); }}>Edit</button></td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
           </div>
         )}
+      </div>
+
+      {editingFixture && (
+        <FixtureModal
+          fixture={editingFixture === "new" ? null : editingFixture}
+          ageGroups={ageGroups}
+          onClose={() => setEditingFixture(null)}
+          onSave={onSaveFixture}
+          onDelete={onDeleteFixture}
+        />
+      )}
+    </div>
+  );
+}
+
+function FixtureModal({ fixture, ageGroups, onClose, onSave, onDelete }) {
+  const realAgeGroups = (ageGroups || []).filter((g) => g !== "All");
+  const [form, setForm] = useState(() => ({
+    id: fixture?.id || "",
+    squadAgeGroup: fixture?.squadAgeGroup || realAgeGroups[0] || "",
+    opponent: fixture?.opponent || "",
+    matchDate: fixture?.matchDate || todayISO(),
+    kickoffTime: fixture?.kickoffTime || "",
+    venue: fixture?.venue || "",
+    homeAway: fixture?.homeAway || "H",
+  }));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function update(field, value) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.opponent.trim() || !form.matchDate) return;
+    setBusy(true);
+    setError("");
+    const result = await onSave(form);
+    if (result?.error) setError(result.error);
+    setBusy(false);
+  }
+
+  async function handleDelete() {
+    setBusy(true);
+    setError("");
+    const result = await onDelete(fixture.id);
+    if (result?.error) setError(result.error);
+    setBusy(false);
+  }
+
+  return (
+    <div className="gfc-modal-backdrop" onClick={onClose}>
+      <div className="gfc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="gfc-modal-head">
+          <div className="gfc-modal-title gfc-display">{fixture ? "Edit fixture" : "Add fixture"}</div>
+          <button className="gfc-modal-close" onClick={onClose}>×</button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="gfc-field">
+            <label className="gfc-label">Team / age group</label>
+            <select className="gfc-select" value={form.squadAgeGroup} onChange={(e) => update("squadAgeGroup", e.target.value)}>
+              {realAgeGroups.length === 0 && <option value="">No age groups yet</option>}
+              {realAgeGroups.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Opponent</label>
+            <input className="gfc-input" value={form.opponent} onChange={(e) => update("opponent", e.target.value)} required />
+          </div>
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Date</label>
+              <input type="date" className="gfc-input" value={form.matchDate} onChange={(e) => update("matchDate", e.target.value)} required />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Kickoff time</label>
+              <input type="time" className="gfc-input" value={form.kickoffTime} onChange={(e) => update("kickoffTime", e.target.value)} />
+            </div>
+          </div>
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Venue</label>
+              <input className="gfc-input" value={form.venue} onChange={(e) => update("venue", e.target.value)} />
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Home / Away</label>
+              <select className="gfc-select" value={form.homeAway} onChange={(e) => update("homeAway", e.target.value)}>
+                <option value="H">Home</option>
+                <option value="A">Away</option>
+              </select>
+            </div>
+          </div>
+          {error && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>{error}</div>}
+          <div className="gfc-modal-actions">
+            {fixture && (
+              <button type="button" className="gfc-btn gfc-btn-danger" style={{ marginRight: "auto" }} onClick={handleDelete} disabled={busy}>
+                Delete fixture
+              </button>
+            )}
+            <button type="button" className="gfc-btn gfc-btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+          </div>
+        </form>
       </div>
     </div>
   );

@@ -279,6 +279,69 @@ function MainApp({ role, onLogout }) {
     }
   }
 
+  // Handles both a brand new manual fixture (no id yet) and editing an
+  // existing one (imported or manual). Editing deliberately leaves
+  // team_label and division_key untouched - team_label may be a nicer
+  // poster-friendly label than the squad age group (e.g. "Under 12 'A'"
+  // vs "U12") for an imported fixture, and division_key is what keeps
+  // re-importing the spreadsheet matching up correctly; neither should be
+  // silently overwritten just because someone fixed the kickoff time.
+  async function saveFixture(form) {
+    setSaveError("");
+    try {
+      if (form.id) {
+        const { error } = await supabase
+          .from("fixtures")
+          .update({
+            squad_age_group: form.squadAgeGroup || "",
+            opponent: form.opponent,
+            match_date: form.matchDate,
+            kickoff_time: form.kickoffTime || null,
+            venue: form.venue || "",
+            home_away: form.homeAway || "H",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", form.id);
+        if (error) throw error;
+      } else {
+        // A brand new manual fixture has no imported division to key off,
+        // so it gets a synthetic one - "manual:<age group>" - unique enough
+        // to avoid colliding with any real spreadsheet division, while
+        // still keeping the (opponent, match_date, division_key)
+        // uniqueness constraint meaningful (two different age groups
+        // playing the same opponent on the same day remain distinct rows).
+        const divisionKey = `manual:${form.squadAgeGroup || "unspecified"}`;
+        const { error } = await supabase.from("fixtures").insert({
+          division_key: divisionKey,
+          team_label: form.squadAgeGroup || "",
+          squad_age_group: form.squadAgeGroup || "",
+          opponent: form.opponent,
+          match_date: form.matchDate,
+          kickoff_time: form.kickoffTime || null,
+          venue: form.venue || "",
+          home_away: form.homeAway || "H",
+        });
+        if (error) throw error;
+      }
+      await loadFixtures();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not save that fixture." };
+    }
+  }
+
+  async function deleteFixture(id) {
+    setSaveError("");
+    try {
+      const { error } = await supabase.from("fixtures").delete().eq("id", id);
+      if (error) throw error;
+      await loadFixtures();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not delete that fixture." };
+    }
+  }
+
   const loadStaffList = useCallback(async () => {
     try {
       const { data: rows, error } = await supabase.from("staff").select("*").order("invited_at", { ascending: false });
@@ -1340,6 +1403,8 @@ function MainApp({ role, onLogout }) {
             ageGroups={ageGroups}
             onImportFixtures={importFixtures}
             onSaveDivisionLabel={saveDivisionLabel}
+            onSaveFixture={saveFixture}
+            onDeleteFixture={deleteFixture}
           />
         )}
 

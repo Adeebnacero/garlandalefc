@@ -11,6 +11,7 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
   const [selectedFixtureIds, setSelectedFixtureIds] = useState(() => new Set());
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const [panelExpanded, setPanelExpanded] = useState(false);
 
   const linkedFixtureIds = useMemo(() => new Set(matches.map((m) => m.fixtureId).filter(Boolean)), [matches]);
 
@@ -119,15 +120,32 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
       </div>
 
       <div className="gfc-panel" style={{ padding: 16, marginBottom: 18 }}>
-        <div className="gfc-panel-head" style={{ marginBottom: 8 }}>
-          <div className="gfc-panel-title">Create from Fixtures</div>
-          <select className="gfc-select" style={{ maxWidth: 160 }} value={windowDays} onChange={(e) => setWindowDays(Number(e.target.value))}>
-            <option value={7}>Next 7 days</option>
-            <option value={14}>Next 14 days</option>
-            <option value={30}>Next 30 days</option>
-            <option value={0}>All upcoming</option>
-          </select>
+        <div className="gfc-panel-head" style={{ marginBottom: panelExpanded ? 8 : 0, cursor: "pointer" }} onClick={() => setPanelExpanded((v) => !v)}>
+          <div className="gfc-panel-title">
+            {panelExpanded ? "▾" : "▸"} Create from Fixtures
+            {!panelExpanded && eligibleFixtures.length > 0 && (
+              <span style={{ marginLeft: 8, fontSize: 11.5, fontWeight: 400, color: T.inkSoft, textTransform: "none" }}>
+                {eligibleFixtures.length} fixture{eligibleFixtures.length === 1 ? "" : "s"} in the next {windowDays || "∞"} days
+              </span>
+            )}
+          </div>
+          {panelExpanded && (
+            <select
+              className="gfc-select"
+              style={{ maxWidth: 160 }}
+              value={windowDays}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setWindowDays(Number(e.target.value))}
+            >
+              <option value={7}>Next 7 days</option>
+              <option value={14}>Next 14 days</option>
+              <option value={30}>Next 30 days</option>
+              <option value={0}>All upcoming</option>
+            </select>
+          )}
         </div>
+        {panelExpanded && (
+          <>
         <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 10 }}>
           Select fixtures to create a Matchday entry (or refresh one that already exists) — opponent, date, time, venue, and age group are filled in automatically; everything else stays blank for you to complete, same as adding one manually.
         </div>
@@ -156,6 +174,8 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
               {syncBusy ? "Working…" : `Create/update ${selectedFixtureIds.size || ""} selected`}
             </button>
             {syncMessage && <span style={{ marginLeft: 10, fontSize: 12, color: T.inkSoft, fontWeight: 600 }}>{syncMessage}</span>}
+          </>
+        )}
           </>
         )}
       </div>
