@@ -287,3 +287,27 @@ export function toDbFixture(f) {
     home_away: f.homeAway === "A" ? "A" : "H",
   };
 }
+
+export function fromDbNotice(row) {
+  return {
+    id: row.id,
+    title: row.title || "",
+    body: row.body || "",
+    category: row.category || "announcement",
+    pinned: !!row.pinned,
+    postedByEmail: row.posted_by_email || "",
+    postedAt: row.posted_at,
+  };
+}
+
+// Deliberately does NOT include posted_by_email - that's filled in by the
+// set_notice_posted_by trigger from whoever's actually logged in, not
+// something the client should be trusted to supply.
+export function toDbNotice(form) {
+  return {
+    title: form.title || "",
+    body: form.body || "",
+    category: form.category === "training" ? "training" : "announcement",
+    pinned: !!form.pinned,
+  };
+}
