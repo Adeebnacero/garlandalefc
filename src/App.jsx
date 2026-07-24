@@ -23,6 +23,8 @@ import {
   fromDbLeagueStanding,
   fromDbFixture,
   toDbFixture,
+  fromDbNotice,
+  toDbNotice,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
 import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
@@ -130,6 +132,8 @@ function MainApp({ role, onLogout }) {
 
   const [divisionLabels, setDivisionLabels] = useState([]);
   const [fixtures, setFixtures] = useState([]);
+  const [notices, setNotices] = useState([]);
+  const [editingNotice, setEditingNotice] = useState(null); // notice or "new" or null
 
   const [staffList, setStaffList] = useState([]);
   const [usersBusy, setUsersBusy] = useState(false);
@@ -339,6 +343,50 @@ function MainApp({ role, onLogout }) {
       return { success: true };
     } catch (e) {
       return { error: e.message || "Could not delete that fixture." };
+    }
+  }
+
+  const loadNotices = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase
+        .from("notices")
+        .select("*")
+        .order("pinned", { ascending: false })
+        .order("posted_at", { ascending: false });
+      if (error) throw error;
+      setNotices((rows || []).map(fromDbNotice));
+    } catch (e) {
+      setLoadError((prev) => prev || e.message || "Could not load notices.");
+    }
+  }, []);
+
+  async function saveNotice(form) {
+    setSaveError("");
+    const payload = toDbNotice(form);
+    try {
+      if (form.id) {
+        const { error } = await supabase.from("notices").update(payload).eq("id", form.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("notices").insert(payload);
+        if (error) throw error;
+      }
+      await loadNotices();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not save that notice." };
+    }
+  }
+
+  async function deleteNotice(id) {
+    setSaveError("");
+    try {
+      const { error } = await supabase.from("notices").delete().eq("id", id);
+      if (error) throw error;
+      await loadNotices();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not delete that notice." };
     }
   }
 
@@ -612,7 +660,8 @@ function MainApp({ role, onLogout }) {
     loadLeagueSources();
     loadLeagueStandings();
     loadFixtures();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings, loadFixtures]);
+    loadNotices();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings, loadFixtures, loadNotices]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -1444,6 +1493,11 @@ function MainApp({ role, onLogout }) {
             emailMessage={emailMessage}
             pendingReminderBatch={pendingReminderBatch}
             onDismissReminderBatch={dismissReminderBatch}
+            notices={notices}
+            editingNotice={editingNotice}
+            setEditingNotice={setEditingNotice}
+            onSaveNotice={saveNotice}
+            onDeleteNotice={deleteNotice}
           />
         )}
       </main>
