@@ -66,6 +66,117 @@ Once it works locally, you can deploy it for free on **Vercel** or
 
 ## What's in this version
 
+- **New: notice targeting + coach team assignments** — a notice can now be
+  aimed at one specific age group instead of always going to everyone.
+  - **Users tab**: assign a coach to one or more teams (multi-select
+    checklist). Admin/Treasurer aren't restricted at all.
+  - **Notice Board**: a new "Target" field — Admin/Treasurer can pick any
+    age group or "All players"; a Coach only ever sees their own assigned
+    team(s) in that dropdown, and gets a clear message if they don't have
+    one assigned yet.
+  - **The real security boundary is in the database, not the dropdown** -
+    even if the UI had a bug, Postgres itself rejects a coach's attempt to
+    post outside their assigned team(s), reassign a post to a different
+    target on edit, or touch another coach's notice.
+  - **Replaces the simpler notices write policy from last time**: that one
+    was a blanket "any of admin/treasurer/coach can write anything" check;
+    this one is genuinely content-aware (per-row, per-role). If you'd
+    already run the previous notices migration, this one supersedes it.
+  - Threaded the logged-in user's own `staff.id` through the app
+    (previously only their `role` was tracked) - needed so a notice can
+    correctly record who posted it.
+  - **Caught two real bugs while building this**: (1) my first version of
+    the update policy let a coach silently retarget their own notice to
+    "All players" or someone else's team when editing it - fixed to
+    re-validate the same ownership rule on update as on insert. (2) the
+    Notice Board UI referenced `role`/`staffId`/`staffTeams` without
+    actually declaring them as props on `MessagesView` - would have been a
+    runtime crash the moment anyone opened that tab; caught by the
+    project's own typecheck before it ever shipped.
+
+- **New: Notice Board, folded into Messages** — a sub-nav toggle
+  ("Player Messages" / "Notice Board") on the Messages tab. Post
+  announcements or training notices, pin the important ones to the top,
+  edit or delete anytime. Admin, Treasurer, and Coach can all post.
+  Read side already existed (built for the player app in another thread);
+  this closes the gap where posting only worked via the Supabase
+  Dashboard's Table Editor as a stopgap.
+  - Reconciled `schema.sql` with the `notices` table that was already live
+    (created directly for the player app's read side) - added here with
+    `if not exists` so this file is a true reflection of what's deployed,
+    same housekeeping done for a few other tables earlier.
+  - Added `posted_by_email`, auto-filled by a trigger from whoever's
+    actually logged in (not client-supplied, same reasoning as the audit
+    log). The trigger only fills it in when it's missing, so restoring a
+    backup preserves each notice's real original poster instead of
+    overwriting all of them with whoever happens to run the restore.
+  - Added a `category` check constraint (`announcement`/`training`) as
+    `NOT VALID` - applies to all new writes immediately without erroring
+    on any pre-existing data; run `alter table notices validate constraint
+    notices_category_check;` separately once you've confirmed existing
+    rows are clean, if you want full historical validation too.
+
+- **"Create from Fixtures" panel on Matchday is now collapsible** —
+  collapsed by default (shows a quick count of how many fixtures are in
+  the current window), click to expand. No more scrolling past it to get
+  to squad selection and team sheet printing.
+- **New: manually add a fixture** — not every fixture necessarily comes
+  from the federation spreadsheet (friendlies, cup fixtures, etc.). The
+  Fixtures tab now has an "+ Add fixture" button, and **every** fixture row
+  (imported or manual) is clickable to edit or delete. A manually-added
+  fixture flows through everywhere fixtures already work - Fixtures Post's
+  poster/PDF selection, and Matchday's "Create from Fixtures" panel - since
+  it's stored in the exact same table.
+  - Editing deliberately leaves an imported fixture's poster-friendly label
+    and its link back to the spreadsheet's division untouched - only the
+    practical fields (opponent, date, time, venue, home/away, age group)
+    are editable, so fixing a kickoff time can't accidentally break
+    re-import matching or silently degrade a nicer poster label back to a
+    plain age-group code.
+
+- **New: create Matchday entries straight from Fixtures** — a "Create from
+  Fixtures" panel on the Matchday tab shows upcoming fixtures (defaults to
+  the next 7 days, adjustable up to 30 days or "all upcoming"). Select
+  which ones to turn into Matchday entries: opponent, date, time, venue,
+  and age group fill in automatically; referee, coach, captain, comments,
+  and squad selections all stay blank, exactly like starting one manually.
+  - Selecting a fixture that already has a linked entry **refreshes** its
+    basic details (in case the time/venue changed) without touching
+    anything you've since filled in - squad selections, results, referee
+    info, etc. are all left alone.
+  - `matches` now has a `fixture_id` column linking back to its source
+    fixture, with a uniqueness guarantee (at most one Matchday entry per
+    fixture).
+  - **Player app groundwork**: added a separate, additive database
+    permission so a player's own account (once the other app reads it) can
+    see match fixtures/results - deliberately simple (any linked player
+    sees all matches), with team-filtering left to the player app itself
+    rather than replicated as a fragile security rule.
+
+- **Fixture data is now shared, not trapped inside Fixtures Post** — a new
+  **Fixtures** tab (Admin/Treasurer/Coach can view; only Admin/Treasurer
+  can import) has the spreadsheet upload and a full table view of every
+  imported fixture. Fixtures Post no longer imports anything itself - it
+  now selects from this shared list (all upcoming fixtures checked by
+  default, uncheck any you don't want on this week's poster/PDF). The
+  manual paste-your-own-fixtures text box is gone entirely, per the call to
+  fully replace it rather than keep it as a fallback.
+  - Re-importing an overlapping date range updates existing fixtures
+    (in case a time or venue genuinely changed) instead of creating
+    duplicates.
+  - The "teach it once" division mapping now asks for **two** things
+    instead of one: the poster-friendly label (as before) and the fixture's
+    **real squad age group** - this is what will let the (separate) player
+    app show a player only their own team's fixtures, matching them
+    against real roster data rather than a display-only label.
+  - **Housekeeping**: found and fixed real drift between this file and the
+    actual live database - several tables that were already live
+    (`reminder_batches`, `audit_log`, `league_table_sources`,
+    `league_standings`, `match_squad.goals/assists`) were missing from this
+    local copy of `schema.sql`. Reconstructed and verified against the
+    real database structure before adding anything new, so this file is
+    now a true reflection of what's actually deployed.
+
 - **Squad & Subscriptions** — same as before: roster, age groups, payment
   ledgers, and the green/amber/red compliance indicator.
 - **Federation reg. no** — each player now has a `reg_no` field for the

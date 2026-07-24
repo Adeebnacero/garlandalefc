@@ -122,8 +122,11 @@ create table if not exists matches (
   physio_name text default '',
   physio_reg_no text default '',
   comments text default '',
+  fixture_id uuid,  -- links back to the fixtures row this Matchday entry was created from, if any (FK added below, after fixtures exists)
   created_at timestamptz default now()
 );
+
+alter table matches add column if not exists fixture_id uuid;
 
 -- ---------- match squad selections ----------
 create table if not exists match_squad (
@@ -133,10 +136,15 @@ create table if not exists match_squad (
   slot_no int not null,           -- 1-11 starting, 12-20 subs, matching the official sheet's NO column
   jersey_no text default '',
   role text default 'starting',  -- 'starting' or 'sub'
+  goals int default 0,
+  assists int default 0,
   created_at timestamptz default now(),
   unique (match_id, slot_no),
   unique (match_id, player_id)
 );
+
+alter table match_squad add column if not exists goals int default 0;
+alter table match_squad add column if not exists assists int default 0;
 
 -- ---------- kit inventory ----------
 create table if not exists inventory_items (
@@ -195,17 +203,281 @@ create table if not exists finance_entries (
   created_at timestamptz default now()
 );
 
+-- ---------- monthly payment reminder batches ----------
+-- Deliberately minimal: this table does NOT store who owes what or
+-- recompute any billing math server-side. It only flags "reminders are
+-- due" once a month. The actual list of who owes money is worked out by
+-- the app itself at review time, using the exact same tested client-side
+-- billing logic already used everywhere else in the app (see
+-- src/lib/billing.js) - avoiding a second, server-side copy of that math
+-- that could quietly drift out of sync with the real one.
+create table if not exists reminder_batches (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  status text not null default 'pending' check (status in ('pending', 'sent', 'dismissed'))
+);
+
+-- ---------- audit log (financially sensitive tables only) ----------
+-- Populated entirely by database triggers, not application code - this is
+-- deliberate: a trigger fires no matter HOW a row changes (through the app,
+-- a direct SQL edit, anything), so it can't be bypassed or forgotten the
+-- way a client-side "please also log this" call could be. Covers only the
+-- financially sensitive tables (payments, finance_entries, tiers,
+-- club_assets), matching the club's actual priority here.
+create table if not exists audit_log (
+  id uuid primary key default gen_random_uuid(),
+  table_name text not null,
+  record_id uuid,
+  action text not null check (action in ('INSERT', 'UPDATE', 'DELETE')),
+  old_data jsonb,
+  new_data jsonb,
+  changed_by uuid,
+  changed_by_email text,
+  changed_at timestamptz default now()
+);
+
+create or replace function audit_log_trigger()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor_email text;
+begin
+  select email into actor_email from staff where user_id = auth.uid();
+
+  insert into audit_log (table_name, record_id, action, old_data, new_data, changed_by, changed_by_email)
+  values (
+    TG_TABLE_NAME,
+    case when TG_OP = 'DELETE' then old.id else new.id end,
+    TG_OP,
+    case when TG_OP in ('UPDATE', 'DELETE') then to_jsonb(old) else null end,
+    case when TG_OP in ('INSERT', 'UPDATE') then to_jsonb(new) else null end,
+    auth.uid(),
+    actor_email
+  );
+
+  if TG_OP = 'DELETE' then
+    return old;
+  else
+    return new;
+  end if;
+end;
+$$;
+
+drop trigger if exists audit_payments on payments;
+create trigger audit_payments after insert or update or delete on payments
+  for each row execute function audit_log_trigger();
+
+drop trigger if exists audit_finance_entries on finance_entries;
+create trigger audit_finance_entries after insert or update or delete on finance_entries
+  for each row execute function audit_log_trigger();
+
+drop trigger if exists audit_tiers on tiers;
+create trigger audit_tiers after insert or update or delete on tiers
+  for each row execute function audit_log_trigger();
+
+drop trigger if exists audit_club_assets on club_assets;
+create trigger audit_club_assets after insert or update or delete on club_assets
+  for each row execute function audit_log_trigger();
+
+-- Note: restoring a backup (restore_from_snapshot) deletes and re-inserts
+-- every row in these tables, which means a restore will generate a large
+-- burst of audit entries - one per row touched. This is expected: restores
+-- are rare, deliberate, high-impact actions, and having a record that one
+-- happened (and exactly what it changed) is arguably a feature, not noise.
+
+-- ---------- league table (scraped from the federation's public standings pages) ----------
+-- Configured once in Settings: a friendly label + the federation's public
+-- standings URL for each of Garlandale's divisions. A scheduled job
+-- (weekly, Monday mornings) fetches and parses each URL via the
+-- fetch-league-tables Edge Function, replacing league_standings with
+-- fresh data. If a fetch or parse ever fails, the LAST successfully
+-- fetched data is deliberately left in place rather than wiped - a stale
+-- table is more useful than a blank one, and this guards against a
+-- temporary site outage or a change to LeagueRepublic's page layout
+-- silently wiping out real, useful data.
+create table if not exists league_table_sources (
+  id uuid primary key default gen_random_uuid(),
+  division_label text not null,
+  source_url text not null,
+  display_order int default 0,
+  last_fetched_at timestamptz,
+  last_fetch_error text,
+  created_at timestamptz default now()
+);
+
+create table if not exists league_standings (
+  id uuid primary key default gen_random_uuid(),
+  source_id uuid not null references league_table_sources(id) on delete cascade,
+  position int,
+  team_name text not null,
+  played int default 0,
+  won int default 0,
+  drawn int default 0,
+  lost int default 0,
+  goals_for int default 0,
+  goals_against int default 0,
+  goal_difference int default 0,
+  points int default 0,
+  is_garlandale boolean default false,
+  fetched_at timestamptz default now()
+);
+
+-- ---------- notice board (built for the player-facing app; this admin app writes to it) ----------
+-- This table already exists live (created directly for the player app's
+-- read side, which is done and unrelated to this file) - defined here with
+-- `if not exists` purely so this schema file is a true reflection of what's
+-- actually deployed, matching every other table in this project. The
+-- player app's own read policy (notices_select_for_players) is untouched;
+-- this only adds what staff need to actually write to it.
+create table if not exists notices (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  body text not null,
+  category text default 'announcement',  -- 'announcement' or 'training'
+  pinned boolean default false,          -- pinned notices sort first
+  posted_by_email text default '',       -- who posted it, for cheap display without a join - set by trigger below, not client-supplied
+  posted_by uuid references staff(id),   -- who posted it, the real FK used by the RLS ownership checks below
+  target_age_group text,                 -- null or 'ALL' = every player; otherwise must match a real age-group value (see matches.age_group, computeAgeGroup() in billing.js)
+  posted_at timestamptz default now()
+);
+
+alter table notices add column if not exists posted_by_email text default '';
+alter table notices add column if not exists posted_by uuid references staff(id);
+alter table notices add column if not exists target_age_group text;
+
+-- ---------- coach team assignments ----------
+-- Which age group(s) each coach is allowed to post notices to. A coach can
+-- be assigned more than one team (e.g. running both U16 and U18), hence a
+-- join table rather than a single column. Admin/Treasurer aren't
+-- restricted by this at all (see the notices RLS policies below) - this
+-- table only matters for coaches.
+create table if not exists staff_teams (
+  staff_id uuid not null references staff(id) on delete cascade,
+  age_group text not null,
+  primary key (staff_id, age_group)
+);
+
+-- Mirrors current_player_id() - returns the staff.id for whoever's
+-- currently logged in, or null if the caller isn't staff at all.
+create or replace function current_staff_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select id from staff where user_id = auth.uid() limit 1;
+$$;
+
+grant execute on function current_staff_id() to authenticated;
+
+-- Soft-adds a category constraint without erroring if any existing row
+-- happens to already hold something outside these two values (NOT VALID
+-- means it applies to all future writes immediately, without checking
+-- historical rows). If you want to confirm existing data is clean too, run
+-- `alter table notices validate constraint notices_category_check;`
+-- separately once you've checked.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'notices_category_check') then
+    alter table notices add constraint notices_category_check check (category in ('announcement', 'training')) not valid;
+  end if;
+end $$;
+
+-- Auto-fills posted_by_email from whoever is actually logged in - not
+-- trusted from client input, same reasoning as audit_log_trigger.
+create or replace function set_notice_posted_by()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  -- Only fill this in when it wasn't already supplied. A genuine new post
+  -- from the client omits it entirely (gets auto-filled here, correctly,
+  -- from whoever's actually logged in). A backup restore explicitly
+  -- provides the real historical value from the snapshot - without this
+  -- check, restoring a backup would silently overwrite every notice's
+  -- attribution with whoever happens to be running the restore.
+  if new.posted_by_email is null or new.posted_by_email = '' then
+    select email into new.posted_by_email from staff where user_id = auth.uid();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists notices_set_posted_by on notices;
+create trigger notices_set_posted_by before insert on notices
+  for each row execute function set_notice_posted_by();
+
 -- ---------- division label mappings (fixture spreadsheet import) ----------
 -- The federation's fixture spreadsheet uses its own division naming (e.g.
 -- "D4 - 6th Division") which doesn't match the club's own friendly team
 -- names (e.g. "1st Team"). This table remembers that translation once it's
 -- taught, so future imports apply it automatically instead of asking again.
+--
+-- squad_age_group is a SEPARATE mapping from team_label: team_label is a
+-- poster-friendly display name (e.g. "Under 12 'A'"), while squad_age_group
+-- is meant to match a REAL age-group value used elsewhere in the app (the
+-- same values computed from player DOB / ageGroupOverride in Squad). These
+-- can differ - team_label is for humans reading the poster, squad_age_group
+-- is for matching this division's fixtures up with the actual roster (used
+-- by the player app to show a player only their own team's fixtures, and
+-- potentially for auto-creating Matchday entries later).
 create table if not exists division_labels (
   id uuid primary key default gen_random_uuid(),
   division_key text not null unique,  -- the raw division text as it appears in the spreadsheet
   team_label text not null,           -- the club's friendly name for that team
+  squad_age_group text default '',    -- the real squad age-group this division corresponds to
   created_at timestamptz default now()
 );
+
+alter table division_labels add column if not exists squad_age_group text default '';
+
+-- ---------- fixtures (federation spreadsheet import, shared across the app) ----------
+-- The federation spreadsheet's own schedule data, extracted and stored once
+-- so it can be reused anywhere: the Fixtures tab's table view, Fixtures
+-- Post's poster/PDF selection, and the player app (a player's own team's
+-- fixtures). Previously this data only existed transiently inside Fixtures
+-- Post as parsed text with nowhere else to go - this table is what fixes
+-- that.
+--
+-- Deduplicated/upserted on re-import: importing an overlapping date range
+-- twice won't create duplicate rows, and if a fixture's time/venue changes
+-- between imports (a genuine reschedule), the existing row is updated
+-- rather than a second one created alongside it.
+create table if not exists fixtures (
+  id uuid primary key default gen_random_uuid(),
+  division_key text not null,          -- raw division text, as it appears in the spreadsheet
+  team_label text default '',          -- poster-friendly label, resolved via division_labels at import time
+  squad_age_group text default '',     -- real squad age-group, resolved via division_labels at import time
+  opponent text not null,
+  match_date date not null,
+  kickoff_time time,
+  venue text default '',
+  home_away text default 'H' check (home_away in ('H', 'A')),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  unique (opponent, match_date, division_key)
+);
+
+-- matches.fixture_id references this table - added here (not inline on
+-- matches' own definition above) since fixtures didn't exist yet at that
+-- point in the file. The unique constraint guarantees at most one Matchday
+-- entry per fixture, which the "update the existing entry if one exists"
+-- sync logic depends on.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'matches_fixture_id_fkey') then
+    alter table matches add constraint matches_fixture_id_fkey foreign key (fixture_id) references fixtures(id) on delete set null;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'matches_fixture_id_key') then
+    alter table matches add constraint matches_fixture_id_key unique (fixture_id);
+  end if;
+end $$;
 
 -- ---------- club settings (singleton row) ----------
 -- Holds non-sensitive configuration the app needs. The Gmail App Password
@@ -229,6 +501,7 @@ insert into club_settings (id) values (1) on conflict (id) do nothing;
 -- triggered manually from the app. Each row is a full copy of every table
 -- at that point in time, stored as JSON.
 create extension if not exists "pg_cron";
+create extension if not exists "pg_net";
 
 create table if not exists backups (
   id uuid primary key default gen_random_uuid(),
@@ -262,7 +535,13 @@ begin
       'club_settings', (select coalesce(jsonb_agg(to_jsonb(cs)), '[]'::jsonb) from club_settings cs),
       'division_labels', (select coalesce(jsonb_agg(to_jsonb(dl)), '[]'::jsonb) from division_labels dl),
       'club_assets', (select coalesce(jsonb_agg(to_jsonb(ca)), '[]'::jsonb) from club_assets ca),
-      'finance_entries', (select coalesce(jsonb_agg(to_jsonb(fe)), '[]'::jsonb) from finance_entries fe)
+      'finance_entries', (select coalesce(jsonb_agg(to_jsonb(fe)), '[]'::jsonb) from finance_entries fe),
+      'reminder_batches', (select coalesce(jsonb_agg(to_jsonb(rb)), '[]'::jsonb) from reminder_batches rb),
+      'audit_log', (select coalesce(jsonb_agg(to_jsonb(al)), '[]'::jsonb) from audit_log al),
+      'league_table_sources', (select coalesce(jsonb_agg(to_jsonb(lts)), '[]'::jsonb) from league_table_sources lts),
+      'league_standings', (select coalesce(jsonb_agg(to_jsonb(ls)), '[]'::jsonb) from league_standings ls),
+      'fixtures', (select coalesce(jsonb_agg(to_jsonb(fx)), '[]'::jsonb) from fixtures fx),
+      'notices', (select coalesce(jsonb_agg(to_jsonb(nt)), '[]'::jsonb) from notices nt)
     )
   )
   returning id into new_id;
@@ -311,6 +590,12 @@ begin
   delete from division_labels;
   delete from club_assets;
   delete from finance_entries;
+  delete from reminder_batches;
+  delete from audit_log;
+  delete from league_standings;
+  delete from league_table_sources;
+  delete from fixtures;
+  delete from notices;
 
   -- Parents first, then children, on the way back in.
   insert into tiers
@@ -333,8 +618,20 @@ begin
     select * from jsonb_populate_recordset(null::division_labels, coalesce(snapshot->'division_labels', '[]'::jsonb));
   insert into club_assets
     select * from jsonb_populate_recordset(null::club_assets, coalesce(snapshot->'club_assets', '[]'::jsonb));
+  insert into reminder_batches
+    select * from jsonb_populate_recordset(null::reminder_batches, coalesce(snapshot->'reminder_batches', '[]'::jsonb));
+  insert into audit_log
+    select * from jsonb_populate_recordset(null::audit_log, coalesce(snapshot->'audit_log', '[]'::jsonb));
+  insert into league_table_sources
+    select * from jsonb_populate_recordset(null::league_table_sources, coalesce(snapshot->'league_table_sources', '[]'::jsonb));
+  insert into league_standings
+    select * from jsonb_populate_recordset(null::league_standings, coalesce(snapshot->'league_standings', '[]'::jsonb));
   insert into finance_entries
     select * from jsonb_populate_recordset(null::finance_entries, coalesce(snapshot->'finance_entries', '[]'::jsonb));
+  insert into fixtures
+    select * from jsonb_populate_recordset(null::fixtures, coalesce(snapshot->'fixtures', '[]'::jsonb));
+  insert into notices
+    select * from jsonb_populate_recordset(null::notices, coalesce(snapshot->'notices', '[]'::jsonb));
 
   if snapshot ? 'club_settings' and jsonb_array_length(coalesce(snapshot->'club_settings', '[]'::jsonb)) > 0 then
     insert into club_settings
@@ -366,6 +663,69 @@ select cron.schedule(
   'garlandale-nightly-backup',
   '0 21 * * *',
   $$select create_backup_snapshot('scheduled');$$
+);
+
+-- ---------- monthly payment reminder batch ----------
+-- Creates a fresh "reminders due" flag on the 1st of each month. Any
+-- previous still-unreviewed batch is dismissed first, so there's only ever
+-- one active batch at a time and the Treasurer always sees a batch that
+-- reflects the current month, not a stale leftover from one they missed.
+create or replace function create_monthly_reminder_batch()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update reminder_batches set status = 'dismissed' where status = 'pending';
+  insert into reminder_batches (status) values ('pending');
+end;
+$$;
+
+-- Runs at 06:00 UTC = 08:00 (8am) Cape Town time on the 1st of every month.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'garlandale-monthly-payment-reminders') then
+    perform cron.unschedule('garlandale-monthly-payment-reminders');
+  end if;
+end $$;
+
+select cron.schedule(
+  'garlandale-monthly-payment-reminders',
+  '0 6 1 * *',
+  $$select create_monthly_reminder_batch();$$
+);
+
+-- ---------- weekly league table refresh ----------
+-- Calls the fetch-league-tables Edge Function every Monday morning (07:00
+-- UTC = 09:00 Cape Town time), after the weekend's matches have been
+-- played and the federation's site has had time to update.
+--
+-- IMPORTANT: replace BOTH placeholders below before running this section -
+-- they're specific to your own Supabase project and can't be filled in
+-- generically here:
+--   YOUR_PROJECT_REF      -> Project Settings -> API -> Project URL
+--   YOUR_SERVICE_ROLE_KEY -> Project Settings -> API -> service_role secret
+-- If you skip this step, the job will run on schedule but silently fail
+-- to reach the function - check Settings -> League table sources for a
+-- "Last fetched" error message if the table never updates.
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'garlandale-weekly-league-tables') then
+    perform cron.unschedule('garlandale-weekly-league-tables');
+  end if;
+end $$;
+
+select cron.schedule(
+  'garlandale-weekly-league-tables',
+  '0 7 * * 1',
+  $$
+  select net.http_post(
+    url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/fetch-league-tables',
+    headers := jsonb_build_object('Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY', 'Content-Type', 'application/json'),
+    body := '{}'::jsonb
+  );
+  $$
 );
 
 -- ---------- Staff accounts & roles ----------
@@ -454,6 +814,21 @@ insert into role_permissions (role, table_name, can_select, can_insert, can_upda
   ('admin',     'division_labels',   true,  true,  true,  true),
   ('treasurer', 'division_labels',   true,  true,  true,  true),
 
+  -- notices: only the 'select' column here actually matters now - insert/
+  -- update/delete for notices has its own dedicated per-row policy logic
+  -- (age-group targeting, ownership) that doesn't consult this table at
+  -- all, so changing true/false here for those three columns has no
+  -- effect. Left as true/true/true for all three roles mostly so the
+  -- table reads honestly (everyone actually can write, just under more
+  -- specific rules than a blanket permission check can express).
+  ('admin',     'notices',           true,  true,  true,  true),
+  ('treasurer', 'notices',           true,  true,  true,  true),
+  ('coach',     'notices',           true,  true,  true,  true),
+
+  ('admin',     'fixtures',          true,  true,  true,  true),
+  ('treasurer', 'fixtures',          true,  true,  true,  true),
+  ('coach',     'fixtures',          true,  false, false, false),
+
   ('admin',     'matches',           true,  true,  true,  true),
   ('coach',     'matches',           true,  true,  true,  true),
 
@@ -468,6 +843,17 @@ insert into role_permissions (role, table_name, can_select, can_insert, can_upda
 
   ('admin',     'finance_entries',   true,  true,  true,  true),
   ('treasurer', 'finance_entries',   true,  true,  true,  true),
+
+  ('admin',     'reminder_batches',  true,  false, true,  false),
+  ('treasurer', 'reminder_batches',  true,  false, true,  false),
+
+  ('admin',     'audit_log',         true,  false, false, false),
+
+  ('admin',     'league_table_sources', true, true, true, true),
+  ('treasurer', 'league_table_sources', true, true, true, true),
+
+  ('admin',     'league_standings',  true,  false, false, false),
+  ('coach',     'league_standings',  true,  false, false, false),
 
   ('admin',     'issued_items',      true,  true,  true,  true),
   ('coach',     'issued_items',      true,  true,  true,  true),
@@ -529,8 +915,14 @@ alter table backups enable row level security;
 alter table player_status_log enable row level security;
 alter table club_settings enable row level security;
 alter table division_labels enable row level security;
+alter table notices enable row level security;
+alter table fixtures enable row level security;
 alter table club_assets enable row level security;
 alter table finance_entries enable row level security;
+alter table reminder_batches enable row level security;
+alter table audit_log enable row level security;
+alter table league_table_sources enable row level security;
+alter table league_standings enable row level security;
 alter table staff enable row level security;
 
 -- Clear out the old open-access policies from before auth existed.
@@ -605,6 +997,109 @@ create policy "division_labels_all" on division_labels for all
   using (has_permission('division_labels', 'select'))
   with check (has_permission('division_labels', 'select'));
 
+-- notices: the player-read policy already exists live and is untouched
+-- (re-declared here only so this file matches reality). SELECT for staff
+-- stays a simple blanket check (every staff member should see the full
+-- notice list in the admin app, for management/oversight) - it's only
+-- INSERT/UPDATE/DELETE that need to be content-aware, replacing the
+-- simpler "any staff role can write anything" policies from an earlier
+-- version of this file with real per-row targeting rules:
+--   - Admin and Treasurer can post/edit/delete anything, any target.
+--   - A Coach can only INSERT a notice targeted at an age group they're
+--     actually assigned to in staff_teams (never 'ALL', never someone
+--     else's team), and can only UPDATE/DELETE notices they themselves
+--     posted - never another coach's.
+--   - `posted_by = current_staff_id()` is enforced on INSERT itself (not
+--     just trusted from the client) - without this, a coach could
+--     otherwise attribute a post to a different staff member, which would
+--     also affect who's later allowed to edit/delete it.
+drop policy if exists "notices_select_for_players" on notices;
+create policy "notices_select_for_players" on notices for select
+  using (current_player_id() is not null);
+
+drop policy if exists "notices_select_for_staff" on notices;
+create policy "notices_select_for_staff" on notices for select
+  using (has_permission('notices', 'select'));
+
+drop policy if exists "notices_insert_for_staff" on notices;
+create policy "notices_insert_for_staff" on notices for insert
+  with check (
+    posted_by = current_staff_id()
+    and (
+      current_staff_role() in ('admin', 'treasurer')
+      or (
+        current_staff_role() = 'coach'
+        and target_age_group is not null
+        and target_age_group <> 'ALL'
+        and exists (
+          select 1 from staff_teams st
+          where st.staff_id = current_staff_id()
+          and st.age_group = notices.target_age_group
+        )
+      )
+    )
+  );
+
+drop policy if exists "notices_update_for_staff" on notices;
+create policy "notices_update_for_staff" on notices for update
+  using (
+    current_staff_role() in ('admin', 'treasurer')
+    or (current_staff_role() = 'coach' and posted_by = current_staff_id())
+  )
+  with check (
+    current_staff_role() in ('admin', 'treasurer')
+    or (
+      current_staff_role() = 'coach'
+      and posted_by = current_staff_id()
+      and target_age_group is not null
+      and target_age_group <> 'ALL'
+      and exists (
+        select 1 from staff_teams st
+        where st.staff_id = current_staff_id()
+        and st.age_group = notices.target_age_group
+      )
+    )
+  );
+
+drop policy if exists "notices_delete_for_staff" on notices;
+create policy "notices_delete_for_staff" on notices for delete
+  using (
+    current_staff_role() in ('admin', 'treasurer')
+    or (current_staff_role() = 'coach' and posted_by = current_staff_id())
+  );
+
+-- staff_teams: admins manage assignments; a coach may read their own rows
+-- (so the notice-posting UI can show them their own teams) but not
+-- anyone else's, and can't write to this table at all.
+alter table staff_teams enable row level security;
+
+drop policy if exists "staff_teams_admin_all" on staff_teams;
+create policy "staff_teams_admin_all" on staff_teams for all
+  using (current_staff_role() = 'admin')
+  with check (current_staff_role() = 'admin');
+
+drop policy if exists "staff_teams_self_select" on staff_teams;
+create policy "staff_teams_self_select" on staff_teams for select
+  using (staff_id = current_staff_id());
+
+-- fixtures: select is uniform (admin/treasurer/coach all just need
+-- has_permission('fixtures','select') to be true), but insert/update/delete
+-- is admin/treasurer only - per-action policies, since permission isn't
+-- uniform across all four actions here (unlike the "for all" tables below).
+drop policy if exists "fixtures_select" on fixtures;
+create policy "fixtures_select" on fixtures for select
+  using (has_permission('fixtures', 'select'));
+drop policy if exists "fixtures_insert" on fixtures;
+create policy "fixtures_insert" on fixtures for insert
+  with check (has_permission('fixtures', 'insert'));
+drop policy if exists "fixtures_update" on fixtures;
+create policy "fixtures_update" on fixtures for update
+  using (has_permission('fixtures', 'update'))
+  with check (has_permission('fixtures', 'update'));
+drop policy if exists "fixtures_delete" on fixtures;
+create policy "fixtures_delete" on fixtures for delete
+  using (has_permission('fixtures', 'delete'));
+
 -- matches, match_squad, inventory_items, issued_items: permission is uniform
 -- across all four actions per role in our matrix, so a single check per
 -- table (gated on 'select') covers the whole FOR ALL policy correctly.
@@ -612,6 +1107,16 @@ drop policy if exists "matches_all" on matches;
 create policy "matches_all" on matches for all
   using (has_permission('matches', 'select'))
   with check (has_permission('matches', 'select'));
+
+-- Separate, additive policy so a player's own app (built elsewhere) can
+-- read fixtures/results - RLS policies are OR'd together, so this doesn't
+-- change or weaken the staff policy above at all. Deliberately simple:
+-- any linked player can read every match, with the player app itself
+-- filtering down to their own team - replicating age-group matching logic
+-- in a security rule would be more fragile than doing it in application code.
+drop policy if exists "matches_player_read" on matches;
+create policy "matches_player_read" on matches for select
+  using (current_player_id() is not null);
 
 drop policy if exists "match_squad_all" on match_squad;
 create policy "match_squad_all" on match_squad for all
@@ -632,6 +1137,37 @@ drop policy if exists "finance_entries_all" on finance_entries;
 create policy "finance_entries_all" on finance_entries for all
   using (has_permission('finance_entries', 'select'))
   with check (has_permission('finance_entries', 'select'));
+
+-- reminder_batches: select + update only (marking a batch sent/dismissed).
+-- No insert/delete policy - only create_monthly_reminder_batch() (security
+-- definer, run by pg_cron) can create one, deliberately keeping "when a
+-- new batch appears" outside of what any logged-in role can trigger by hand.
+drop policy if exists "reminder_batches_select" on reminder_batches;
+create policy "reminder_batches_select" on reminder_batches for select
+  using (has_permission('reminder_batches', 'select'));
+drop policy if exists "reminder_batches_update" on reminder_batches;
+create policy "reminder_batches_update" on reminder_batches for update
+  using (has_permission('reminder_batches', 'update'))
+  with check (has_permission('reminder_batches', 'update'));
+
+-- audit_log: select only - nothing writes to this except audit_log_trigger()
+-- (security definer), so no insert/update/delete policy is exposed here at all.
+drop policy if exists "audit_log_select" on audit_log;
+create policy "audit_log_select" on audit_log for select
+  using (has_permission('audit_log', 'select'));
+
+-- league_table_sources: full CRUD for whichever roles manage Settings
+drop policy if exists "league_table_sources_all" on league_table_sources;
+create policy "league_table_sources_all" on league_table_sources for all
+  using (has_permission('league_table_sources', 'select'))
+  with check (has_permission('league_table_sources', 'select'));
+
+-- league_standings: select only - nothing writes to this except
+-- fetch-league-tables (using the service role key), so no
+-- insert/update/delete policy is exposed here at all.
+drop policy if exists "league_standings_select" on league_standings;
+create policy "league_standings_select" on league_standings for select
+  using (has_permission('league_standings', 'select'));
 
 drop policy if exists "issued_items_all" on issued_items;
 create policy "issued_items_all" on issued_items for all

@@ -23,6 +23,8 @@ import {
   fromDbLeagueStanding,
   fromDbFixture,
   toDbFixture,
+  fromDbNotice,
+  toDbNotice,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
 import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
@@ -73,7 +75,7 @@ const ADMIN_NAV = [
   { id: "users", label: "Users", icon: "👤", roles: ["admin"] },
 ];
 
-function MainApp({ role, onLogout }) {
+function MainApp({ role, staffId, onLogout }) {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -130,6 +132,9 @@ function MainApp({ role, onLogout }) {
 
   const [divisionLabels, setDivisionLabels] = useState([]);
   const [fixtures, setFixtures] = useState([]);
+  const [notices, setNotices] = useState([]);
+  const [editingNotice, setEditingNotice] = useState(null); // notice or "new" or null
+  const [staffTeams, setStaffTeams] = useState([]);
 
   const [staffList, setStaffList] = useState([]);
   const [usersBusy, setUsersBusy] = useState(false);
@@ -342,6 +347,51 @@ function MainApp({ role, onLogout }) {
     }
   }
 
+  const loadNotices = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase
+        .from("notices")
+        .select("*")
+        .order("pinned", { ascending: false })
+        .order("posted_at", { ascending: false });
+      if (error) throw error;
+      setNotices((rows || []).map(fromDbNotice));
+    } catch (e) {
+      setLoadError((prev) => prev || e.message || "Could not load notices.");
+    }
+  }, []);
+
+  async function saveNotice(form) {
+    setSaveError("");
+    const payload = toDbNotice(form, staffId);
+    try {
+      if (form.id) {
+        const { posted_by, ...updatePayload } = payload; // never reassign ownership on edit
+        const { error } = await supabase.from("notices").update(updatePayload).eq("id", form.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("notices").insert(payload);
+        if (error) throw error;
+      }
+      await loadNotices();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not save that notice." };
+    }
+  }
+
+  async function deleteNotice(id) {
+    setSaveError("");
+    try {
+      const { error } = await supabase.from("notices").delete().eq("id", id);
+      if (error) throw error;
+      await loadNotices();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not delete that notice." };
+    }
+  }
+
   const loadStaffList = useCallback(async () => {
     try {
       const { data: rows, error } = await supabase.from("staff").select("*").order("invited_at", { ascending: false });
@@ -409,6 +459,38 @@ function MainApp({ role, onLogout }) {
       setUsersMessage(`Failed to remove access: ${e.message || "unknown error"}`);
     } finally {
       setUsersBusy(false);
+    }
+  }
+
+  const loadStaffTeams = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("staff_teams").select("*");
+      if (error) throw error;
+      setStaffTeams((rows || []).map((r) => ({ staffId: r.staff_id, ageGroup: r.age_group })));
+    } catch (e) {
+      // Non-critical - a coach whose teams fail to load just sees no
+      // options in the target dropdown, which is safe (fails closed).
+    }
+  }, []);
+
+  // Replaces the FULL set of a given staff member's team assignments with
+  // the provided list - simpler and less error-prone than diffing which
+  // ones were added/removed, and this is a low-frequency admin action.
+  async function saveStaffTeamsForStaff(staffMemberId, ageGroupList) {
+    setSaveError("");
+    try {
+      const { error: deleteErr } = await supabase.from("staff_teams").delete().eq("staff_id", staffMemberId);
+      if (deleteErr) throw deleteErr;
+      if (ageGroupList.length > 0) {
+        const { error: insertErr } = await supabase
+          .from("staff_teams")
+          .insert(ageGroupList.map((ageGroup) => ({ staff_id: staffMemberId, age_group: ageGroup })));
+        if (insertErr) throw insertErr;
+      }
+      await loadStaffTeams();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not save team assignments." };
     }
   }
 
@@ -612,7 +694,9 @@ function MainApp({ role, onLogout }) {
     loadLeagueSources();
     loadLeagueStandings();
     loadFixtures();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings, loadFixtures]);
+    loadNotices();
+    loadStaffTeams();
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings, loadFixtures, loadNotices, loadStaffTeams]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -1425,6 +1509,9 @@ function MainApp({ role, onLogout }) {
             onRemove={removeStaffMember}
             busy={usersBusy}
             message={usersMessage}
+            staffTeams={staffTeams}
+            ageGroups={ageGroups}
+            onSaveStaffTeams={saveStaffTeamsForStaff}
           />
         )}
 
@@ -1444,6 +1531,14 @@ function MainApp({ role, onLogout }) {
             emailMessage={emailMessage}
             pendingReminderBatch={pendingReminderBatch}
             onDismissReminderBatch={dismissReminderBatch}
+            notices={notices}
+            editingNotice={editingNotice}
+            setEditingNotice={setEditingNotice}
+            onSaveNotice={saveNotice}
+            onDeleteNotice={deleteNotice}
+            role={role}
+            staffId={staffId}
+            staffTeams={staffTeams}
           />
         )}
       </main>
@@ -1568,6 +1663,7 @@ export default function AppRoot() {
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [role, setRole] = useState(null);
+  const [staffId, setStaffId] = useState(null);
   // Evaluated once, from the hash captured the instant supabaseClient.js
   // loaded - NOT from window.location.hash here, since Supabase's client
   // may have already auto-processed and cleared the real one by the time
@@ -1592,13 +1688,15 @@ export default function AppRoot() {
   }, []);
 
   const loadRole = useCallback(async () => {
-    if (!session?.user?.id) { setRole(null); return; }
+    if (!session?.user?.id) { setRole(null); setStaffId(null); return; }
     try {
-      const { data, error } = await supabase.from("staff").select("role").eq("user_id", session.user.id).single();
-      if (error || !data) { setRole("none"); return; }
+      const { data, error } = await supabase.from("staff").select("id, role").eq("user_id", session.user.id).single();
+      if (error || !data) { setRole("none"); setStaffId(null); return; }
       setRole(data.role);
+      setStaffId(data.id);
     } catch (e) {
       setRole("none");
+      setStaffId(null);
     }
   }, [session]);
 
@@ -1610,6 +1708,7 @@ export default function AppRoot() {
     await supabase.auth.signOut();
     setSession(null);
     setRole(null);
+    setStaffId(null);
   }
 
   function handleInviteDone() {
@@ -1649,5 +1748,5 @@ export default function AppRoot() {
     return <NoAccessView email={session.user.email} onLogout={handleLogout} />;
   }
 
-  return <MainApp role={role} onLogout={handleLogout} />;
+  return <MainApp role={role} staffId={staffId} onLogout={handleLogout} />;
 }

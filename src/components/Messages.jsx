@@ -3,7 +3,10 @@ import { T } from "../theme.js";
 import { waLink, smsLink, fillTemplate, TEMPLATES } from "../lib/messaging.js";
 import { Badge } from "./shared.jsx";
 
-export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds, templateId, setTemplateId, customText, setCustomText, onEmailStatement, onBulkEmailStatements, emailBusy, emailMessage, pendingReminderBatch, onDismissReminderBatch }) {
+const CATEGORY_LABELS = { announcement: "Announcement", training: "Training" };
+
+export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds, templateId, setTemplateId, customText, setCustomText, onEmailStatement, onBulkEmailStatements, emailBusy, emailMessage, pendingReminderBatch, onDismissReminderBatch, notices, editingNotice, setEditingNotice, onSaveNotice, onDeleteNotice, role, staffId, staffTeams }) {
+  const [subTab, setSubTab] = useState("messages"); // "messages" | "notices"
   const [msgAgeFilter, setMsgAgeFilter] = useState("All");
   const [msgStatusFilter, setMsgStatusFilter] = useState("All");
 
@@ -43,10 +46,33 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
       <div className="gfc-topbar">
         <div>
           <div className="gfc-page-title gfc-display">Messages</div>
-          <div className="gfc-page-sub">Trigger WhatsApp or SMS messages to players / guardians</div>
+          <div className="gfc-page-sub">
+            {subTab === "messages" ? "Trigger WhatsApp or SMS messages to players / guardians" : "Post announcements and training notices to the player app"}
+          </div>
         </div>
       </div>
 
+      <div style={{ display: "flex", gap: 4, marginBottom: 18 }}>
+        <button
+          className="gfc-btn gfc-btn-sm"
+          style={{ background: subTab === "messages" ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === "messages" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+          onClick={() => setSubTab("messages")}
+        >
+          Player Messages
+        </button>
+        <button
+          className="gfc-btn gfc-btn-sm"
+          style={{ background: subTab === "notices" ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === "notices" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+          onClick={() => setSubTab("notices")}
+        >
+          Notice Board
+        </button>
+      </div>
+
+      {subTab === "notices" ? (
+        <NoticeBoardSection notices={notices} role={role} staffId={staffId} onAdd={() => setEditingNotice("new")} onEdit={(n) => setEditingNotice(n)} />
+      ) : (
+      <>
       {pendingReminderBatch && (
         <div style={{ background: T.indigoSoft, border: `1px solid ${T.indigo}`, borderRadius: 10, padding: "12px 14px", marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ fontSize: 12.5, color: "#fff" }}>
@@ -184,6 +210,186 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
             })}
           </div>
         )}
+      </div>
+      </>
+      )}
+
+      {editingNotice && (
+        <NoticeModal
+          notice={editingNotice === "new" ? null : editingNotice}
+          role={role}
+          staffId={staffId}
+          staffTeams={staffTeams}
+          ageGroups={ageGroups}
+          onClose={() => setEditingNotice(null)}
+          onSave={onSaveNotice}
+          onDelete={onDeleteNotice}
+        />
+      )}
+    </div>
+  );
+}
+
+function NoticeBoardSection({ notices, role, staffId, onAdd, onEdit }) {
+  function canEdit(n) {
+    if (role === "admin" || role === "treasurer") return true;
+    return n.postedBy === staffId; // a coach may only touch their own posts
+  }
+
+  return (
+    <div className="gfc-panel">
+      <div className="gfc-panel-head">
+        <div className="gfc-panel-title">Notices ({(notices || []).length})</div>
+        <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={onAdd}>+ Add notice</button>
+      </div>
+      {(!notices || notices.length === 0) ? (
+        <div className="gfc-empty">
+          <div className="gfc-empty-title gfc-display">No notices yet</div>
+          Post an announcement or training notice for players to see in the app.
+        </div>
+      ) : (
+        <div className="gfc-scroll-wrap">
+        <table className="gfc-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Target</th>
+              <th>Pinned</th>
+              <th>Posted by</th>
+              <th>Posted</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {notices.map((n) => {
+              const editable = canEdit(n);
+              return (
+                <tr key={n.id} className={editable ? "clickable" : ""} onClick={() => editable && onEdit(n)}>
+                  <td style={{ fontWeight: 600 }}>{n.title}</td>
+                  <td><span className="gfc-agepill">{CATEGORY_LABELS[n.category] || n.category}</span></td>
+                  <td><span className="gfc-agepill" style={{ background: T.indigoSoft }}>{n.targetAgeGroup || "ALL"}</span></td>
+                  <td>{n.pinned ? "📌 Yes" : "—"}</td>
+                  <td style={{ fontSize: 11.5, color: T.inkSoft }}>{n.postedByEmail || "—"}</td>
+                  <td style={{ fontSize: 11.5, color: T.inkSoft }}>{n.postedAt ? new Date(n.postedAt).toLocaleDateString("en-ZA") : "—"}</td>
+                  <td>
+                    {editable ? (
+                      <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); onEdit(n); }}>Edit</button>
+                    ) : (
+                      <span style={{ fontSize: 11, color: T.inkSoft }} title="Only the original poster (or an Admin/Treasurer) can edit this">View only</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, onSave, onDelete }) {
+  const isAdminOrTreasurer = role === "admin" || role === "treasurer";
+  const myTeams = useMemo(
+    () => (staffTeams || []).filter((t) => t.staffId === staffId).map((t) => t.ageGroup),
+    [staffTeams, staffId]
+  );
+  const targetOptions = isAdminOrTreasurer ? (ageGroups || []).filter((g) => g !== "All") : myTeams;
+
+  const [form, setForm] = useState(() => ({
+    id: notice?.id || "",
+    title: notice?.title || "",
+    body: notice?.body || "",
+    category: notice?.category || "announcement",
+    pinned: notice?.pinned || false,
+    targetAgeGroup: notice?.targetAgeGroup || (isAdminOrTreasurer ? "ALL" : myTeams[0] || ""),
+  }));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function update(field, value) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!form.title.trim() || !form.body.trim() || !form.targetAgeGroup) return;
+    setBusy(true);
+    setError("");
+    const result = await onSave(form);
+    if (result?.error) setError(result.error);
+    else onClose();
+    setBusy(false);
+  }
+
+  async function handleDelete() {
+    setBusy(true);
+    setError("");
+    const result = await onDelete(notice.id);
+    if (result?.error) setError(result.error);
+    else onClose();
+    setBusy(false);
+  }
+
+  return (
+    <div className="gfc-modal-backdrop" onClick={onClose}>
+      <div className="gfc-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="gfc-modal-head">
+          <div className="gfc-modal-title gfc-display">{notice ? "Edit notice" : "Add notice"}</div>
+          <button className="gfc-modal-close" onClick={onClose}>×</button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="gfc-field">
+            <label className="gfc-label">Title</label>
+            <input className="gfc-input" value={form.title} onChange={(e) => update("title", e.target.value)} required />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Message</label>
+            <textarea className="gfc-textarea" rows={4} value={form.body} onChange={(e) => update("body", e.target.value)} required />
+          </div>
+          <div className="gfc-row2">
+            <div className="gfc-field">
+              <label className="gfc-label">Category</label>
+              <select className="gfc-select" value={form.category} onChange={(e) => update("category", e.target.value)}>
+                <option value="announcement">Announcement</option>
+                <option value="training">Training</option>
+              </select>
+            </div>
+            <div className="gfc-field">
+              <label className="gfc-label">Target</label>
+              <select className="gfc-select" value={form.targetAgeGroup} onChange={(e) => update("targetAgeGroup", e.target.value)} disabled={targetOptions.length === 0}>
+                {isAdminOrTreasurer && <option value="ALL">All players</option>}
+                {targetOptions.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+          </div>
+          {!isAdminOrTreasurer && targetOptions.length === 0 && (
+            <div style={{ fontSize: 11.5, color: T.danger, fontWeight: 600, marginBottom: 10 }}>
+              You don't have any teams assigned yet — ask an Admin to assign you one in Users before you can post.
+            </div>
+          )}
+          <div className="gfc-field">
+            <label className="gfc-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={form.pinned} onChange={(e) => update("pinned", e.target.checked)} />
+              Pin to top
+            </label>
+          </div>
+          {notice?.postedByEmail && (
+            <div style={{ fontSize: 11, color: T.inkSoft, marginBottom: 10 }}>Posted by {notice.postedByEmail}</div>
+          )}
+          {error && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>{error}</div>}
+          <div className="gfc-modal-actions">
+            {notice && (
+              <button type="button" className="gfc-btn gfc-btn-danger" style={{ marginRight: "auto" }} onClick={handleDelete} disabled={busy}>
+                Delete notice
+              </button>
+            )}
+            <button type="button" className="gfc-btn gfc-btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy || !form.targetAgeGroup}>{busy ? "Saving…" : "Save"}</button>
+          </div>
+        </form>
       </div>
     </div>
   );

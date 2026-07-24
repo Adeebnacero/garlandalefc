@@ -287,3 +287,39 @@ export function toDbFixture(f) {
     home_away: f.homeAway === "A" ? "A" : "H",
   };
 }
+
+// Deliberately does NOT include posted_by_email - that's filled in by the
+// set_notice_posted_by trigger from whoever's actually logged in, not
+// something the client should be trusted to supply.
+export function fromDbNotice(row) {
+  return {
+    id: row.id,
+    title: row.title || "",
+    body: row.body || "",
+    category: row.category || "announcement",
+    pinned: !!row.pinned,
+    postedByEmail: row.posted_by_email || "",
+    postedBy: row.posted_by || "",
+    targetAgeGroup: row.target_age_group || "ALL",
+    postedAt: row.posted_at,
+  };
+}
+
+// posted_by is deliberately included here (unlike posted_by_email, which a
+// trigger fills in automatically) - the RLS insert policy requires
+// posted_by to equal the caller's own current_staff_id(), so the client
+// must supply it explicitly. Only relevant for a brand new notice -
+// saveNotice() below strips it back out before an update, so editing a
+// notice never silently reassigns who it's attributed to. target_age_group
+// of "ALL" is stored as null, matching the convention the player-app side
+// already uses (null or 'ALL' both mean "everyone").
+export function toDbNotice(form, staffId) {
+  return {
+    title: form.title || "",
+    body: form.body || "",
+    category: form.category === "training" ? "training" : "announcement",
+    pinned: !!form.pinned,
+    posted_by: staffId,
+    target_age_group: !form.targetAgeGroup || form.targetAgeGroup === "ALL" ? null : form.targetAgeGroup,
+  };
+}
