@@ -2,6 +2,8 @@ import React, { useState, useMemo } from "react";
 import { T } from "../theme.js";
 import { fmtDate, todayISO } from "../lib/format.js";
 import { printTeamSheet } from "../lib/teamSheet.js";
+import { computeMonthOptions, computeMonthRange } from "../lib/dateCascade.js";
+import { usePagination, Pagination } from "./shared.jsx";
 
 export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey, onUpdateStats, fixtures, onSyncFixtures }) {
   const activeMatch = matches.find((m) => m.id === activeMatchId) || null;
@@ -15,6 +17,20 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
 
   const linkedFixtureIds = useMemo(() => new Set(matches.map((m) => m.fixtureId).filter(Boolean)), [matches]);
 
+  const [monthFilter, setMonthFilter] = useState("all");
+  const monthOptions = useMemo(() => computeMonthOptions(matches, (m) => m.matchDate), [matches]);
+  const filteredMatches = useMemo(() => {
+    if (monthFilter === "all") return matches;
+    const [year, month] = monthFilter.split("-").map(Number);
+    const { start, end } = computeMonthRange(year, month);
+    return matches.filter((m) => {
+      if (!m.matchDate) return false;
+      const d = new Date(m.matchDate);
+      return !isNaN(d.getTime()) && d >= start && d <= end;
+    });
+  }, [matches, monthFilter]);
+  const { page, setPage, totalPages, pageItems } = usePagination(filteredMatches, { pageSize: 10, resetKey: monthFilter });
+
   const eligibleFixtures = useMemo(() => {
     const today = todayISO();
     const cutoff = windowDays === 0 ? null : new Date(Date.now() + windowDays * 86400000).toISOString().slice(0, 10);
@@ -22,6 +38,8 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
       .filter((f) => f.matchDate >= today && (!cutoff || f.matchDate <= cutoff))
       .sort((a, b) => (a.matchDate + (a.kickoffTime || "")).localeCompare(b.matchDate + (b.kickoffTime || "")));
   }, [fixtures, windowDays]);
+
+  const eligiblePagination = usePagination(eligibleFixtures, { pageSize: 10, resetKey: windowDays });
 
   function toggleFixture(id) {
     setSelectedFixtureIds((prev) => {
@@ -154,7 +172,7 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
         ) : (
           <>
             <div className="gfc-checklist" style={{ marginBottom: 10 }}>
-              {eligibleFixtures.map((f) => (
+              {eligiblePagination.pageItems.map((f) => (
                 <label key={f.id} className="gfc-checklist-row" style={{ cursor: "pointer" }}>
                   <span className="gfc-checklist-left">
                     <input type="checkbox" checked={selectedFixtureIds.has(f.id)} onChange={() => toggleFixture(f.id)} />
@@ -170,6 +188,13 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
                 </label>
               ))}
             </div>
+            <Pagination
+              page={eligiblePagination.page}
+              setPage={eligiblePagination.setPage}
+              totalPages={eligiblePagination.totalPages}
+              totalItems={eligibleFixtures.length}
+              pageSize={10}
+            />
             <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={handleSync} disabled={syncBusy || selectedFixtureIds.size === 0}>
               {syncBusy ? "Working…" : `Create/update ${selectedFixtureIds.size || ""} selected`}
             </button>
@@ -182,12 +207,22 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
 
       <div className="gfc-row2" style={{ alignItems: "flex-start", gridTemplateColumns: "260px 1fr" }}>
         <div className="gfc-panel" style={{ padding: 0 }}>
-          <div className="gfc-panel-head"><div className="gfc-panel-title">Fixtures</div></div>
+          <div className="gfc-panel-head" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+            <div className="gfc-panel-title">Fixtures</div>
+            {monthOptions.length > 0 && (
+              <select className="gfc-select" style={{ width: "100%" }} value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}>
+                <option value="all">All fixtures</option>
+                {monthOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+            )}
+          </div>
           {matches.length === 0 ? (
             <div className="gfc-empty">No fixtures yet. Add one to get started.</div>
+          ) : filteredMatches.length === 0 ? (
+            <div className="gfc-empty">No fixtures in this month.</div>
           ) : (
             <div>
-              {matches.map((m) => (
+              {pageItems.map((m) => (
                 <div
                   key={m.id}
                   onClick={() => setActiveMatchId(m.id)}
@@ -205,6 +240,7 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
               ))}
             </div>
           )}
+          <Pagination page={page} setPage={setPage} totalPages={totalPages} totalItems={filteredMatches.length} pageSize={10} />
         </div>
 
         {!activeMatch ? (

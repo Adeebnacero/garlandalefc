@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { T } from "../theme.js";
 import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
+import { usePagination, Pagination } from "./shared.jsx";
 import {
   buildCombinedLedger,
   computePeriodRange,
@@ -43,6 +44,11 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit }) 
   const monthlyChartData = useMemo(() => computeMonthlyChartData(ledger, viewMode, selectedYear, today), [ledger, viewMode, selectedYear, today]);
 
   const periodFiltered = useMemo(() => filterLedger(ledger, periodRange, categoryFilter), [ledger, periodRange, categoryFilter]);
+
+  const { page, setPage, totalPages, pageItems } = usePagination(periodFiltered, {
+    pageSize: 15,
+    resetKey: `${viewMode}-${selectedYear}-${selectedMonth}-${categoryFilter}`,
+  });
 
   const allCategories = useMemo(() => {
     const set = new Set(ledger.map((r) => r.category));
@@ -157,7 +163,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit }) 
               </tr>
             </thead>
             <tbody>
-              {periodFiltered.map((r) => (
+              {pageItems.map((r) => (
                 <tr key={r.id} className={r.isSubscription ? "" : "clickable"} onClick={() => !r.isSubscription && onEdit(r)}>
                   <td>{fmtDate(r.date)}</td>
                   <td style={{ fontWeight: 600 }}>{r.description}</td>
@@ -178,6 +184,7 @@ export function FinanceView({ financeEntries, players, assets, onAdd, onEdit }) 
           </table>
           </div>
         )}
+        <Pagination page={page} setPage={setPage} totalPages={totalPages} totalItems={periodFiltered.length} pageSize={15} />
       </div>
     </div>
   );

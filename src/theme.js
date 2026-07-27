@@ -283,6 +283,34 @@ table.gfc-table tr:last-child td { border-bottom: none; }
 table.gfc-table tr.clickable { cursor: pointer; }
 table.gfc-table tr.clickable:hover td { background: ${T.paperDim}; }
 
+/* -------- Pagination -------- */
+.gfc-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid ${T.line};
+}
+.gfc-pagination-range {
+  font-size: 12px;
+  color: ${T.inkSoft};
+  font-weight: 600;
+}
+.gfc-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gfc-pagination-label {
+  font-size: 12px;
+  color: ${T.inkSoft};
+  font-weight: 600;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
 .gfc-empty {
   padding: 40px 20px;
   text-align: center;

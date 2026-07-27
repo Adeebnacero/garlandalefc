@@ -1,13 +1,15 @@
 import React, { useState } from "react";
 import { T } from "../theme.js";
 import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
-import { Badge, InactiveToggle } from "./shared.jsx";
+import { Badge, InactiveToggle, usePagination, Pagination } from "./shared.jsx";
 
 export function SubscriptionsView({ enriched, tiers, includeInactive, setIncludeInactive, onOpenLedger, onManageTiers }) {
   const sorted = [...enriched].sort((a, b) => b.balance - a.balance);
   const totalDue = enriched.reduce((s, p) => s + p.due, 0);
   const totalPaid = enriched.reduce((s, p) => s + p.paid, 0);
   const totalOutstanding = enriched.reduce((s, p) => s + Math.max(0, p.balance), 0);
+
+  const { page, setPage, totalPages, pageItems } = usePagination(sorted, { pageSize: 15, resetKey: includeInactive });
 
   return (
     <div>
@@ -65,7 +67,7 @@ export function SubscriptionsView({ enriched, tiers, includeInactive, setInclude
               </tr>
             </thead>
             <tbody>
-              {sorted.map((p) => (
+              {pageItems.map((p) => (
                 <tr key={p.id} className="clickable" onClick={() => onOpenLedger(p)}>
                   <td style={{ fontWeight: 600 }}>{p.name}</td>
                   <td><span className="gfc-agepill">{p.ageGroup}</span></td>
@@ -83,6 +85,7 @@ export function SubscriptionsView({ enriched, tiers, includeInactive, setInclude
           </table>
           </div>
         )}
+        <Pagination page={page} setPage={setPage} totalPages={totalPages} totalItems={sorted.length} pageSize={15} />
       </div>
     </div>
   );

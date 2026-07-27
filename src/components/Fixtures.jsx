@@ -7,6 +7,8 @@ import {
   findUnmappedDivisions,
   formatDisplayTime,
 } from "../lib/fixtureImport.js";
+import { MONTH_NAMES, computeAvailableYears, filterByMonth } from "../lib/dateCascade.js";
+import { usePagination, Pagination } from "./shared.jsx";
 
 function cleanDivisionGuess(text) {
   return String(text || "").replace(/^[A-Za-z0-9]+\s*-\s*/, "").trim();
@@ -23,8 +25,13 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
   const [pendingLabels, setPendingLabels] = useState({}); // division -> { teamLabel, squadAgeGroup }
   const [pendingFixtures, setPendingFixtures] = useState(null);
 
-  const [dateFilter, setDateFilter] = useState("upcoming"); // "upcoming" | "all"
+  const today = useMemo(() => new Date(), []);
+  const [dateFilter, setDateFilter] = useState("upcoming"); // "upcoming" | "month" | "all"
+  const [selectedYear, setSelectedYear] = useState(today.getUTCFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(today.getUTCMonth());
   const [teamFilter, setTeamFilter] = useState("All");
+
+  const availableYears = useMemo(() => computeAvailableYears(fixtures, (f) => f.matchDate, today), [fixtures, today]);
 
   const divisionLabelMap = useMemo(() => {
     const map = {};
@@ -123,14 +130,21 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
   const filtered = useMemo(() => {
     let rows = fixtures || [];
     if (dateFilter === "upcoming") {
-      const today = todayISO();
-      rows = rows.filter((f) => f.matchDate >= today);
+      const todayStr = todayISO();
+      rows = rows.filter((f) => f.matchDate >= todayStr);
+    } else if (dateFilter === "month") {
+      rows = filterByMonth(rows, (f) => f.matchDate, selectedYear, selectedMonth);
     }
     if (teamFilter !== "All") {
       rows = rows.filter((f) => (f.squadAgeGroup || f.teamLabel) === teamFilter);
     }
     return [...rows].sort((a, b) => (a.matchDate + (a.kickoffTime || "")).localeCompare(b.matchDate + (b.kickoffTime || "")));
-  }, [fixtures, dateFilter, teamFilter]);
+  }, [fixtures, dateFilter, selectedYear, selectedMonth, teamFilter]);
+
+  const { page, setPage, totalPages, pageItems } = usePagination(filtered, {
+    pageSize: 15,
+    resetKey: `${dateFilter}-${selectedYear}-${selectedMonth}-${teamFilter}`,
+  });
 
   return (
     <div>
@@ -203,8 +217,19 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
           <div className="gfc-filters">
             <select className="gfc-select" style={{ maxWidth: 140 }} value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
               <option value="upcoming">Upcoming</option>
+              <option value="month">By month</option>
               <option value="all">All (incl. past)</option>
             </select>
+            {dateFilter === "month" && (
+              <>
+                <select className="gfc-select" style={{ maxWidth: 150 }} value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))}>
+                  {MONTH_NAMES.map((name, i) => <option key={name} value={i}>{name}</option>)}
+                </select>
+                <select className="gfc-select" style={{ maxWidth: 110 }} value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))}>
+                  {availableYears.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </>
+            )}
             <select className="gfc-select" style={{ maxWidth: 160 }} value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}>
               <option value="All">All teams</option>
               {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -234,7 +259,7 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
               </tr>
             </thead>
             <tbody>
-              {filtered.map((f) => (
+              {pageItems.map((f) => (
                 <tr key={f.id} className={canImport ? "clickable" : ""} onClick={() => canImport && setEditingFixture(f)}>
                   <td>{fmtDate(f.matchDate)}</td>
                   <td className="gfc-mono">{formatDisplayTime(f.kickoffTime)}</td>
@@ -251,6 +276,7 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
           </table>
           </div>
         )}
+        <Pagination page={page} setPage={setPage} totalPages={totalPages} totalItems={filtered.length} pageSize={15} />
       </div>
 
       {editingFixture && (
