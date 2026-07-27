@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { T } from "../theme.js";
 import { fmtMoney } from "../lib/format.js";
 import { diffFields } from "../lib/auditLog.js";
+import { usePagination, Pagination } from "./shared.jsx";
 
 const TABLE_LABELS = {
   payments: "Payment",
@@ -34,6 +35,7 @@ function describeAuditEntry(entry, players) {
 export function BackupsView({ backups, onRefresh, onBackupNow, onRestore, onDownload, onRestoreFromFile, busy, lastMessage, auditLog, players }) {
   const fileInputRef = React.useRef(null);
   const [expandedId, setExpandedId] = useState(null);
+  const { page, setPage, totalPages, pageItems: auditPage } = usePagination(auditLog || [], { pageSize: 15 });
 
   function handleFileChosen(e) {
     const file = e.target.files?.[0];
@@ -46,7 +48,7 @@ export function BackupsView({ backups, onRefresh, onBackupNow, onRestore, onDown
       <div className="gfc-topbar">
         <div>
           <div className="gfc-page-title gfc-display">Backups</div>
-          <div className="gfc-page-sub">Automatic nightly snapshot at 11pm · last 30 days kept</div>
+          <div className="gfc-page-sub">Automatic nightly snapshot at 11pm · last 10 snapshots kept</div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="gfc-btn gfc-btn-outline" onClick={onRefresh} disabled={busy}>Refresh list</button>
@@ -128,7 +130,7 @@ export function BackupsView({ backups, onRefresh, onBackupNow, onRestore, onDown
               </tr>
             </thead>
             <tbody>
-              {auditLog.map((entry) => {
+              {auditPage.map((entry) => {
                 const isExpanded = expandedId === entry.id;
                 const changes = diffFields(entry.oldData, entry.newData);
                 const context = describeAuditEntry(entry, players);
@@ -189,6 +191,7 @@ export function BackupsView({ backups, onRefresh, onBackupNow, onRestore, onDown
           </table>
           </div>
         )}
+        <Pagination page={page} setPage={setPage} totalPages={totalPages} totalItems={(auditLog || []).length} pageSize={15} />
       </div>
     </div>
   );
