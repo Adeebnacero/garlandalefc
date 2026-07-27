@@ -30,7 +30,8 @@ export function InactiveToggle({ includeInactive, setIncludeInactive }) {
  * @param {Array<any>} items
  * @param {{ pageSize?: number, resetKey?: any }} [options]
  */
-export function usePagination(items, { pageSize = 15, resetKey } = {}) {
+export function usePagination(items, options) {
+  const { pageSize = 15, resetKey } = options || {};
   const [page, setPage] = useState(1);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
