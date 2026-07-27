@@ -26,6 +26,9 @@ export function InactiveToggle({ includeInactive, setIncludeInactive }) {
  * anything that changes when the caller's filters change (e.g. a template
  * string of the active filter values) so the page snaps back to 1 instead of
  * landing on an empty page after the filtered set shrinks.
+ *
+ * @param {Array<any>} items
+ * @param {{ pageSize?: number, resetKey?: any }} [options]
  */
 export function usePagination(items, { pageSize = 15, resetKey } = {}) {
   const [page, setPage] = useState(1);
