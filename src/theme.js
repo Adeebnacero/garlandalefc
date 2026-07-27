@@ -76,7 +76,9 @@ ${FONT_IMPORT}
   color: #fff;
   display: flex;
   flex-direction: column;
-  position: relative;
+  position: sticky;
+  top: 0;
+  height: 100vh;
   overflow: hidden;
 }
 .gfc-sidebar::after {
@@ -119,6 +121,7 @@ ${FONT_IMPORT}
   padding: 16px 12px;
   position: relative;
   z-index: 1;
+  overflow-y: auto;
 }
 .gfc-nav-item {
   display: flex;
@@ -481,8 +484,8 @@ table.gfc-table tr.clickable:hover td { background: ${T.paperDim}; }
 
 @media (max-width: 720px) {
   .gfc-app { flex-direction: column; }
-  .gfc-sidebar { width: 100%; min-width: 0; }
-  .gfc-nav { display: flex; overflow-x: auto; padding: 10px 12px; }
+  .gfc-sidebar { width: 100%; min-width: 0; position: relative; top: auto; height: auto; }
+  .gfc-nav { display: flex; overflow-x: auto; overflow-y: visible; padding: 10px 12px; }
   .gfc-nav-item { white-space: nowrap; margin-bottom: 0; }
   .gfc-main { padding: 20px 16px 40px; }
   .gfc-row2 { grid-template-columns: 1fr; }
