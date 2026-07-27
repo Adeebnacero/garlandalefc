@@ -6,7 +6,11 @@ import { Badge } from "./shared.jsx";
 const CATEGORY_LABELS = { announcement: "Announcement", training: "Training" };
 
 export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds, templateId, setTemplateId, customText, setCustomText, onEmailStatement, onBulkEmailStatements, emailBusy, emailMessage, pendingReminderBatch, onDismissReminderBatch, notices, editingNotice, setEditingNotice, onSaveNotice, onDeleteNotice, role, staffId, staffTeams }) {
-  const [subTab, setSubTab] = useState("messages"); // "messages" | "notices"
+  // Coaches only get the Notice Board here - "Player Messages" surfaces
+  // payment balances/compliance status, which the app deliberately never
+  // shows a coach (see role_permissions/finance tables for the same rule).
+  const canSeePlayerMessages = role !== "coach";
+  const [subTab, setSubTab] = useState(canSeePlayerMessages ? "messages" : "notices"); // "messages" | "notices"
   const [msgAgeFilter, setMsgAgeFilter] = useState("All");
   const [msgStatusFilter, setMsgStatusFilter] = useState("All");
 
@@ -52,24 +56,26 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 18 }}>
-        <button
-          className="gfc-btn gfc-btn-sm"
-          style={{ background: subTab === "messages" ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === "messages" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
-          onClick={() => setSubTab("messages")}
-        >
-          Player Messages
-        </button>
-        <button
-          className="gfc-btn gfc-btn-sm"
-          style={{ background: subTab === "notices" ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === "notices" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
-          onClick={() => setSubTab("notices")}
-        >
-          Notice Board
-        </button>
-      </div>
+      {canSeePlayerMessages && (
+        <div style={{ display: "flex", gap: 4, marginBottom: 18 }}>
+          <button
+            className="gfc-btn gfc-btn-sm"
+            style={{ background: subTab === "messages" ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === "messages" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+            onClick={() => setSubTab("messages")}
+          >
+            Player Messages
+          </button>
+          <button
+            className="gfc-btn gfc-btn-sm"
+            style={{ background: subTab === "notices" ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === "notices" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+            onClick={() => setSubTab("notices")}
+          >
+            Notice Board
+          </button>
+        </div>
+      )}
 
-      {subTab === "notices" ? (
+      {!canSeePlayerMessages || subTab === "notices" ? (
         <NoticeBoardSection notices={notices} role={role} staffId={staffId} onAdd={() => setEditingNotice("new")} onEdit={(n) => setEditingNotice(n)} />
       ) : (
       <>
