@@ -349,9 +349,18 @@ function MainApp({ role, staffId, onLogout }) {
 
   const loadNotices = useCallback(async () => {
     try {
+      // Birthday notices (posted automatically by the daily
+      // create_birthday_notices() job - see schema.sql) are meant to be
+      // short-lived. The job itself deletes anything older than 48h once a
+      // day, but that leaves a gap right up until the next run; filtering
+      // them out of the client's own query as soon as they cross 48h keeps
+      // the board looking clean in the meantime without needing a delete
+      // permission every role has.
+      const cutoffIso = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
       const { data: rows, error } = await supabase
         .from("notices")
         .select("*")
+        .or(`category.neq.birthday,posted_at.gte.${cutoffIso}`)
         .order("pinned", { ascending: false })
         .order("posted_at", { ascending: false });
       if (error) throw error;
