@@ -387,6 +387,19 @@ begin
   end if;
 end $$;
 
+-- Widen the category check to also allow 'birthday' (see the automated
+-- birthday-notice job further down). Drop + recreate rather than editing
+-- in place, since Postgres has no ALTER CONSTRAINT for check clauses.
+alter table notices drop constraint if exists notices_category_check;
+alter table notices add constraint notices_category_check check (category in ('announcement', 'training', 'birthday')) not valid;
+
+-- Which player a notice is about, if any. Only ever set for category =
+-- 'birthday' notices (see create_birthday_notices() below) - lets that job
+-- tell "has today's notice for this player already gone out" apart from
+-- just matching on title text, and lets the daily cleanup job target
+-- exactly the right rows. NULL for every ordinary staff-authored notice.
+alter table notices add column if not exists related_player_id uuid references players(id) on delete cascade;
+
 -- Auto-fills posted_by_email from whoever is actually logged in - not
 -- trusted from client input, same reasoning as audit_log_trigger.
 create or replace function set_notice_posted_by()
@@ -694,6 +707,101 @@ select cron.schedule(
   'garlandale-monthly-payment-reminders',
   '0 6 1 * *',
   $$select create_monthly_reminder_batch();$$
+);
+
+-- ---------- daily birthday notices ----------
+-- Posts one Notice Board entry per player whose birthday is today, targeted
+-- at their own age group, so the whole team sees it. Runs as the database
+-- itself (security definer), not as any logged-in staff member, so it's not
+-- limited by a coach's own team assignment the way a client-triggered post
+-- would be - it can post for every age group unconditionally, and doesn't
+-- rely on anyone actually opening the app on the day in question.
+--
+-- Age-group logic mirrors computeAgeGroup() in src/lib/billing.js (English/
+-- SA grassroots convention: cutoff birthday is 31 August). Keep the two in
+-- sync if that function's rules ever change.
+create or replace function create_birthday_notices()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  today date := (now() at time zone 'Africa/Johannesburg')::date; -- SA local calendar day
+  cutoff_year int;
+  p record;
+  computed_age_group text;
+begin
+  -- Clear out yesterday's (and any older) birthday notices first, so the
+  -- board never shows more than ~24h of birthday clutter and today's fresh
+  -- run always starts from a clean slate.
+  delete from notices where category = 'birthday' and posted_at < now() - interval '48 hours';
+
+  cutoff_year := case when extract(month from today) >= 9 then extract(year from today) + 1 else extract(year from today) end;
+
+  for p in
+    select id, name, dob, age_group_override
+    from players
+    where dob is not null
+      and extract(month from dob) = extract(month from today)
+      and extract(day from dob) = extract(day from today)
+  loop
+    if p.age_group_override is not null and p.age_group_override <> '' then
+      computed_age_group := p.age_group_override;
+    else
+      declare
+        age int := cutoff_year - extract(year from p.dob)::int;
+      begin
+        computed_age_group := case
+          when age >= 18 then 'Seniors'
+          when age <= 0 then 'Unassigned'
+          else 'U' || age
+        end;
+      end;
+    end if;
+
+    if computed_age_group is null or computed_age_group = 'Unassigned' then
+      continue; -- no valid age group to target - skip rather than guess
+    end if;
+
+    -- Dedupe: skip if today's notice for this player already went out (in
+    -- case the job is ever run more than once in the same day).
+    if exists (
+      select 1 from notices
+      where category = 'birthday'
+        and related_player_id = p.id
+        and posted_at::date = today
+    ) then
+      continue;
+    end if;
+
+    insert into notices (title, body, category, pinned, target_age_group, related_player_id, posted_by_email)
+    values (
+      '🎂 ' || split_part(p.name, ' ', 1) || '''s Birthday!',
+      'It''s ' || split_part(p.name, ' ', 1) || '''s birthday today! Let''s all join in and wish them a Happy Birthday from the Garlandale FC family! 🎉',
+      'birthday',
+      true,
+      computed_age_group,
+      p.id,
+      'Garlandale FC'
+    );
+  end loop;
+end;
+$$;
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'garlandale-daily-birthday-notices') then
+    perform cron.unschedule('garlandale-daily-birthday-notices');
+  end if;
+end $$;
+
+-- Runs daily at 05:00 UTC = 07:00 (7am) Cape Town time, ahead of the
+-- weekly league refresh and well before a typical training/matchday.
+select cron.schedule(
+  'garlandale-daily-birthday-notices',
+  '0 5 * * *',
+  $$select create_birthday_notices();$$
 );
 
 -- ---------- weekly league table refresh ----------

@@ -66,6 +66,20 @@ Once it works locally, you can deploy it for free on **Vercel** or
 
 ## What's in this version
 
+- **New: automatic birthday notices** — every day at 07:00 Cape Town time, a
+  scheduled database job checks for any player whose birthday falls today
+  and posts one Notice Board entry to their age group ("It's {name}'s
+  birthday today! Let's all join in and wish them a Happy Birthday..."). It
+  runs on the database itself (not triggered by anyone opening the app), so
+  it fires even if no one logs in that day, and it isn't limited by a
+  coach's own team assignment. Birthday notices auto-expire after ~48
+  hours (cleaned up by the job itself, and hidden from the board sooner on
+  the client side too), so the board doesn't fill up with old ones.
+  **If you already have this app deployed**, re-run `schema.sql` in the
+  Supabase SQL Editor to pick up the new `create_birthday_notices()`
+  function, its cron schedule, and the small `notices` table changes it
+  needs (a `related_player_id` column, and `birthday` added as a valid
+  notice category).
 - **New: notice targeting + coach team assignments** — a notice can now be
   aimed at one specific age group instead of always going to everyone.
   - **Users tab**: assign a coach to one or more teams (multi-select
