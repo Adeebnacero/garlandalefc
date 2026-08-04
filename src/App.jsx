@@ -431,14 +431,24 @@ function MainApp({ role, staffId, onLogout }) {
     }
   }
 
-  // Invites a SPECIFIC player to claim their own account (groundwork for
-  // the future player-facing app - see invite-player Edge Function).
+  // Invites a SPECIFIC player to claim their own account, sending them to
+  // the separate Player Portal app (invite-player Edge Function) rather
+  // than this one. This redirectTo only takes effect if that URL is also
+  // present in Supabase's Auth > URL Configuration > Redirect URLs
+  // allow-list; if it's missing there, Supabase silently falls back to the
+  // project's Site URL and the player ends up here instead. As a safety
+  // net for that case (and for any other way an invite link lands on the
+  // wrong app), AcceptInviteView/NoAccessView in Auth.jsx offer a "go to
+  // the Player Portal instead" option once the password is set, and the
+  // Player Portal's accept-invite.html offers the mirror-image "go to Club
+  // Management instead" option - so a misdirected invite degrades to an
+  // extra click rather than a dead end.
   // Returns {success:true} or {error:message} rather than managing global
   // state, since this is triggered from inside PlayerModal, not a tab.
   async function invitePlayer(playerId, email) {
     try {
       const { data, error } = await supabase.functions.invoke("invite-player", {
-        body: { playerId, email, redirectTo: "https://garlandale-player-app.vercel.app/accept-invite.html" },
+        body: { playerId, email, redirectTo: "https://www.gfcplayers.co.za/accept-invite.html" },
       });
       if (error || data?.error) {
         const msg = await extractFunctionErrorMessage(error, data);
