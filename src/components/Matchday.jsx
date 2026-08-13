@@ -5,9 +5,23 @@ import { printTeamSheet } from "../lib/teamSheet.js";
 import { computeMonthOptions, computeMonthRange } from "../lib/dateCascade.js";
 import { usePagination, Pagination } from "./shared.jsx";
 
-export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey, onUpdateStats, fixtures, onSyncFixtures }) {
+export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey, onUpdateStats, fixtures, staffList, onSyncFixtures }) {
   const activeMatch = matches.find((m) => m.id === activeMatchId) || null;
   const [rosterAgeFilter, setRosterAgeFilter] = useState("All");
+
+  // Read-only lookup of who's been appointed to referee the active match,
+  // sourced from the fixture it was created from (Fixtures tab is where
+  // that assignment is actually made). Deliberately separate from the
+  // free-text "Referee" field inside Edit fixture below, which is filled
+  // in by hand from what's on the paper team sheet on the day and may not
+  // match the appointment (a late substitute referee, for example).
+  const assignedRefereeEmail = useMemo(() => {
+    if (!activeMatch?.fixtureId) return "";
+    const fixture = (fixtures || []).find((f) => f.id === activeMatch.fixtureId);
+    if (!fixture?.refereeId) return "";
+    const referee = (staffList || []).find((s) => s.id === fixture.refereeId);
+    return referee?.email || "";
+  }, [activeMatch, fixtures, staffList]);
 
   const [windowDays, setWindowDays] = useState(7);
   const [selectedFixtureIds, setSelectedFixtureIds] = useState(() => new Set());
@@ -259,6 +273,11 @@ export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setA
                   <div style={{ fontSize: 12, color: T.inkSoft, marginTop: 2 }}>
                     {fmtDate(activeMatch.matchDate)} {activeMatch.kickoffTime ? `· ${activeMatch.kickoffTime}` : ""} · {activeMatch.division || "Division TBC"} · {activeMatch.competition || "Competition TBC"}
                   </div>
+                  {assignedRefereeEmail && (
+                    <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 4 }}>
+                      Referee appointed: <strong>{assignedRefereeEmail}</strong>
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={() => onEditMatch(activeMatch)}>Edit fixture</button>

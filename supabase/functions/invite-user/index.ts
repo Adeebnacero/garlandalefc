@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     }
 
     const { email, role, redirectTo } = await req.json();
-    if (!email || !role || !["admin", "treasurer", "coach"].includes(role)) {
+    if (!email || !role || !["admin", "treasurer", "coach", "referee"].includes(role)) {
       return new Response(JSON.stringify({ error: "Missing or invalid 'email'/'role'." }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
