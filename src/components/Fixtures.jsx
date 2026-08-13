@@ -14,7 +14,7 @@ function cleanDivisionGuess(text) {
   return String(text || "").replace(/^[A-Za-z0-9]+\s*-\s*/, "").trim();
 }
 
-export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImportFixtures, onSaveDivisionLabel, onSaveFixture, onDeleteFixture }) {
+export function FixturesView({ fixtures, divisionLabels, role, ageGroups, staffList, onImportFixtures, onSaveDivisionLabel, onSaveFixture, onDeleteFixture }) {
   const canImport = role === "admin" || role === "treasurer";
   const fileInputRef = useRef(null);
   const [editingFixture, setEditingFixture] = useState(null); // fixture row, or "new", or null
@@ -30,8 +30,20 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
   const [selectedYear, setSelectedYear] = useState(today.getUTCFullYear());
   const [selectedMonth, setSelectedMonth] = useState(today.getUTCMonth());
   const [teamFilter, setTeamFilter] = useState("All");
+  const [refereeFilter, setRefereeFilter] = useState("All");
 
   const availableYears = useMemo(() => computeAvailableYears(fixtures, (f) => f.matchDate, today), [fixtures, today]);
+
+  const refereeOptions = useMemo(() => (staffList || []).filter((s) => s.role === "referee"), [staffList]);
+  const refereeEmailById = useMemo(() => {
+    const map = {};
+    refereeOptions.forEach((r) => { map[r.id] = r.email; });
+    return map;
+  }, [refereeOptions]);
+  const refereeFilterOptions = useMemo(() => {
+    const ids = new Set((fixtures || []).map((f) => f.refereeId).filter(Boolean));
+    return Array.from(ids).map((id) => ({ id, email: refereeEmailById[id] || "Unknown" })).sort((a, b) => a.email.localeCompare(b.email));
+  }, [fixtures, refereeEmailById]);
 
   const divisionLabelMap = useMemo(() => {
     const map = {};
@@ -138,12 +150,15 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
     if (teamFilter !== "All") {
       rows = rows.filter((f) => (f.squadAgeGroup || f.teamLabel) === teamFilter);
     }
+    if (refereeFilter !== "All") {
+      rows = rows.filter((f) => f.refereeId === refereeFilter);
+    }
     return [...rows].sort((a, b) => (a.matchDate + (a.kickoffTime || "")).localeCompare(b.matchDate + (b.kickoffTime || "")));
-  }, [fixtures, dateFilter, selectedYear, selectedMonth, teamFilter]);
+  }, [fixtures, dateFilter, selectedYear, selectedMonth, teamFilter, refereeFilter]);
 
   const { page, setPage, totalPages, pageItems } = usePagination(filtered, {
     pageSize: 15,
-    resetKey: `${dateFilter}-${selectedYear}-${selectedMonth}-${teamFilter}`,
+    resetKey: `${dateFilter}-${selectedYear}-${selectedMonth}-${teamFilter}-${refereeFilter}`,
   });
 
   return (
@@ -234,6 +249,12 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
               <option value="All">All teams</option>
               {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+            {refereeFilterOptions.length > 0 && (
+              <select className="gfc-select" style={{ maxWidth: 180 }} value={refereeFilter} onChange={(e) => setRefereeFilter(e.target.value)}>
+                <option value="All">All referees</option>
+                {refereeFilterOptions.map((r) => <option key={r.id} value={r.id}>{r.email}</option>)}
+              </select>
+            )}
             {canImport && (
               <button className="gfc-btn gfc-btn-primary gfc-btn-sm" onClick={() => setEditingFixture("new")}>+ Add fixture</button>
             )}
@@ -255,6 +276,7 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
                 <th>Opponent</th>
                 <th>Venue</th>
                 <th>H/A</th>
+                <th>Referee</th>
                 {canImport && <th></th>}
               </tr>
             </thead>
@@ -267,6 +289,9 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
                   <td>{f.opponent}</td>
                   <td>{f.venue}</td>
                   <td>{f.homeAway}</td>
+                  <td style={{ fontSize: 12 }}>
+                    {f.refereeId ? (refereeEmailById[f.refereeId] || "Unknown") : <span style={{ color: T.inkSoft }}>Unassigned</span>}
+                  </td>
                   {canImport && (
                     <td><button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); setEditingFixture(f); }}>Edit</button></td>
                   )}
@@ -283,6 +308,7 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
         <FixtureModal
           fixture={editingFixture === "new" ? null : editingFixture}
           ageGroups={ageGroups}
+          refereeOptions={refereeOptions}
           onClose={() => setEditingFixture(null)}
           onSave={onSaveFixture}
           onDelete={onDeleteFixture}
@@ -292,7 +318,7 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, onImpo
   );
 }
 
-function FixtureModal({ fixture, ageGroups, onClose, onSave, onDelete }) {
+function FixtureModal({ fixture, ageGroups, refereeOptions, onClose, onSave, onDelete }) {
   const realAgeGroups = (ageGroups || []).filter((g) => g !== "All");
   const [form, setForm] = useState(() => ({
     id: fixture?.id || "",
@@ -302,6 +328,7 @@ function FixtureModal({ fixture, ageGroups, onClose, onSave, onDelete }) {
     kickoffTime: fixture?.kickoffTime || "",
     venue: fixture?.venue || "",
     homeAway: fixture?.homeAway || "H",
+    refereeId: fixture?.refereeId || "",
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -346,6 +373,16 @@ function FixtureModal({ fixture, ageGroups, onClose, onSave, onDelete }) {
           <div className="gfc-field">
             <label className="gfc-label">Opponent</label>
             <input className="gfc-input" value={form.opponent} onChange={(e) => update("opponent", e.target.value)} required />
+          </div>
+          <div className="gfc-field">
+            <label className="gfc-label">Referee</label>
+            <select className="gfc-select" value={form.refereeId} onChange={(e) => update("refereeId", e.target.value)}>
+              <option value="">— Unassigned —</option>
+              {(refereeOptions || []).map((r) => <option key={r.id} value={r.id}>{r.email}</option>)}
+            </select>
+            {(refereeOptions || []).length === 0 && (
+              <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 4 }}>No referees invited yet — add one from the Users tab.</div>
+            )}
           </div>
           <div className="gfc-row2">
             <div className="gfc-field">

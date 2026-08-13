@@ -272,6 +272,7 @@ export function fromDbFixture(row) {
     kickoffTime: row.kickoff_time || "",
     venue: row.venue || "",
     homeAway: row.home_away || "H",
+    refereeId: row.referee_id || "",
   };
 }
 
@@ -285,6 +286,21 @@ export function toDbFixture(f) {
     kickoff_time: f.kickoffTime || null,
     venue: f.venue || "",
     home_away: f.homeAway === "A" ? "A" : "H",
+  };
+}
+
+// Referee appointments (payment log) - one row per fixture that has a
+// referee assigned. fixture/referee display fields (opponent, date,
+// email) are joined in from the already-loaded fixtures/staff lists in
+// App.jsx rather than re-fetched here, same approach as staffTeams.
+export function fromDbRefereeAppointment(row) {
+  return {
+    id: row.id,
+    fixtureId: row.fixture_id,
+    refereeId: row.referee_id,
+    feeAmount: Number(row.fee_amount) || 0,
+    paid: !!row.paid,
+    paidAt: row.paid_at || "",
   };
 }
 

@@ -73,6 +73,24 @@ export function SettingsView({ clubSettings, onSave, leagueSources, onAddLeagueS
       </form>
 
       <div className="gfc-panel" style={{ padding: 20, marginTop: 18 }}>
+        <div className="gfc-panel-title" style={{ marginBottom: 4 }}>Referees</div>
+        <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 14 }}>
+          The default match fee used when a referee is first assigned to a fixture. It's editable per appointment afterwards on the Referee Pay tab, so this is just the starting point. Saved together with "Save settings" above.
+        </div>
+        <div className="gfc-field" style={{ maxWidth: 220, marginBottom: 0 }}>
+          <label className="gfc-label">Default referee fee (R)</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="gfc-input"
+            value={form.defaultRefereeFee}
+            onChange={(e) => update("defaultRefereeFee", e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="gfc-panel" style={{ padding: 20, marginTop: 18 }}>
         <div className="gfc-panel-head" style={{ marginBottom: 4 }}>
           <div className="gfc-panel-title">League table sources</div>
           <button type="button" className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={onAddLeagueSource}>+ Add division</button>

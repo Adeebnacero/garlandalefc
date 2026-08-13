@@ -23,6 +23,7 @@ import {
   fromDbLeagueStanding,
   fromDbFixture,
   toDbFixture,
+  fromDbRefereeAppointment,
   fromDbNotice,
   toDbNotice,
 } from "./lib/dbMappers.js";
@@ -48,6 +49,7 @@ import { FixturesPostView } from "./components/FixturesPost.jsx";
 import { FixturesView } from "./components/Fixtures.jsx";
 import { SettingsView, LeagueSourceModal } from "./components/Settings.jsx";
 import { UsersView } from "./components/Users.jsx";
+import { RefereePayView } from "./components/RefereePay.jsx";
 import { LoginView, AcceptInviteView, NoAccessView } from "./components/Auth.jsx";
 
 /* ---------- HELPERS ---------- */
@@ -64,12 +66,13 @@ const CLUB_OPS_NAV = [
   { id: "messages", label: "Messages", icon: "✉", roles: ["admin", "treasurer", "coach"] },
   { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
   { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
-  { id: "fixtures", label: "Fixtures", icon: "📋", roles: ["admin", "treasurer", "coach"] },
+  { id: "fixtures", label: "Fixtures", icon: "📋", roles: ["admin", "treasurer", "coach", "referee"] },
   { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
 ];
 
 const ADMIN_NAV = [
   { id: "fixtures-post", label: "Fixtures Post", icon: "🖼", roles: ["admin", "treasurer"] },
+  { id: "referee-pay", label: "Referee Pay", icon: "🟨", roles: ["admin", "treasurer"] },
   { id: "backups", label: "Backups", icon: "⟳", roles: ["admin"] },
   { id: "settings", label: "Settings", icon: "⚙", roles: ["admin", "treasurer"] },
   { id: "users", label: "Users", icon: "👤", roles: ["admin"] },
@@ -80,7 +83,7 @@ function MainApp({ role, staffId, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
-  const [tab, setTab] = useState(role === "coach" ? "squad" : "dashboard");
+  const [tab, setTab] = useState(role === "coach" ? "squad" : role === "referee" ? "fixtures" : "dashboard");
   const [adminExpanded, setAdminExpanded] = useState(false);
   const [ageFilter, setAgeFilter] = useState("All");
   const [includeInactive, setIncludeInactive] = useState(false);
@@ -125,13 +128,14 @@ function MainApp({ role, staffId, onLogout }) {
   const [backupMessage, setBackupMessage] = useState("");
 
   const [clubSettings, setClubSettings] = useState({
-    senderEmail: "", senderDisplayName: "Garlandale FC", replyToEmail: "", bankDetails: "", invoiceFooterNote: "",
+    senderEmail: "", senderDisplayName: "Garlandale FC", replyToEmail: "", bankDetails: "", invoiceFooterNote: "", defaultRefereeFee: 0,
   });
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailMessage, setEmailMessage] = useState("");
 
   const [divisionLabels, setDivisionLabels] = useState([]);
   const [fixtures, setFixtures] = useState([]);
+  const [refereeAppointments, setRefereeAppointments] = useState([]);
   const [notices, setNotices] = useState([]);
   const [editingNotice, setEditingNotice] = useState(null); // notice or "new" or null
   const [staffTeams, setStaffTeams] = useState([]);
@@ -152,7 +156,13 @@ function MainApp({ role, staffId, onLogout }) {
 
   const loadClubSettings = useCallback(async () => {
     try {
-      const { data: row, error } = await supabase.from("club_settings").select("*").eq("id", 1).single();
+      // maybeSingle (not single) - Referees don't have club_settings select
+      // permission at all (they shouldn't see banking details), so this
+      // legitimately comes back with zero rows for that role. single()
+      // would treat that as an error and throw a full-screen "Try again"
+      // for a role that's supposed to only ever see Fixtures; maybeSingle()
+      // just leaves clubSettings at its (safe, blank) default instead.
+      const { data: row, error } = await supabase.from("club_settings").select("*").eq("id", 1).maybeSingle();
       if (error) throw error;
       if (row) {
         setClubSettings({
@@ -161,6 +171,7 @@ function MainApp({ role, staffId, onLogout }) {
           replyToEmail: row.reply_to_email || "",
           bankDetails: row.bank_details || "",
           invoiceFooterNote: row.invoice_footer_note || "",
+          defaultRefereeFee: row.default_referee_fee ?? 0,
         });
       }
     } catch (e) {
@@ -179,6 +190,7 @@ function MainApp({ role, staffId, onLogout }) {
           reply_to_email: form.replyToEmail || "",
           bank_details: form.bankDetails || "",
           invoice_footer_note: form.invoiceFooterNote || "",
+          default_referee_fee: Number(form.defaultRefereeFee) || 0,
           updated_at: new Date().toISOString(),
         })
         .eq("id", 1);
@@ -304,6 +316,7 @@ function MainApp({ role, staffId, onLogout }) {
             kickoff_time: form.kickoffTime || null,
             venue: form.venue || "",
             home_away: form.homeAway || "H",
+            referee_id: form.refereeId || null,
             updated_at: new Date().toISOString(),
           })
           .eq("id", form.id);
@@ -325,10 +338,12 @@ function MainApp({ role, staffId, onLogout }) {
           kickoff_time: form.kickoffTime || null,
           venue: form.venue || "",
           home_away: form.homeAway || "H",
+          referee_id: form.refereeId || null,
         });
         if (error) throw error;
       }
       await loadFixtures();
+      await loadRefereeAppointments();
       return { success: true };
     } catch (e) {
       return { error: e.message || "Could not save that fixture." };
@@ -344,6 +359,41 @@ function MainApp({ role, staffId, onLogout }) {
       return { success: true };
     } catch (e) {
       return { error: e.message || "Could not delete that fixture." };
+    }
+  }
+
+  // referee_appointments is the payment log - a row here is created/synced
+  // automatically (by a database trigger, see schema.sql) whenever a
+  // fixture's referee_id is set or changed, so the client only ever reads
+  // it and edits the fee/paid fields - it never inserts or deletes rows
+  // itself.
+  const loadRefereeAppointments = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase.from("referee_appointments").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      setRefereeAppointments((rows || []).map(fromDbRefereeAppointment));
+    } catch (e) {
+      // Silent for roles without access (Coach/Referee) - same reasoning
+      // as loadStaffList: an RLS-denied read here is expected and fine,
+      // this tab is hidden from those roles anyway.
+    }
+  }, []);
+
+  async function updateRefereeAppointment(id, updates) {
+    setSaveError("");
+    try {
+      const payload = {};
+      if (updates.feeAmount !== undefined) payload.fee_amount = Number(updates.feeAmount) || 0;
+      if (updates.paid !== undefined) {
+        payload.paid = !!updates.paid;
+        payload.paid_at = updates.paid ? new Date().toISOString() : null;
+      }
+      const { error } = await supabase.from("referee_appointments").update(payload).eq("id", id);
+      if (error) throw error;
+      await loadRefereeAppointments();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not update that appointment." };
     }
   }
 
@@ -431,14 +481,24 @@ function MainApp({ role, staffId, onLogout }) {
     }
   }
 
-  // Invites a SPECIFIC player to claim their own account (groundwork for
-  // the future player-facing app - see invite-player Edge Function).
+  // Invites a SPECIFIC player to claim their own account, sending them to
+  // the separate Player Portal app (invite-player Edge Function) rather
+  // than this one. This redirectTo only takes effect if that URL is also
+  // present in Supabase's Auth > URL Configuration > Redirect URLs
+  // allow-list; if it's missing there, Supabase silently falls back to the
+  // project's Site URL and the player ends up here instead. As a safety
+  // net for that case (and for any other way an invite link lands on the
+  // wrong app), AcceptInviteView/NoAccessView in Auth.jsx offer a "go to
+  // the Player Portal instead" option once the password is set, and the
+  // Player Portal's accept-invite.html offers the mirror-image "go to Club
+  // Management instead" option - so a misdirected invite degrades to an
+  // extra click rather than a dead end.
   // Returns {success:true} or {error:message} rather than managing global
   // state, since this is triggered from inside PlayerModal, not a tab.
   async function invitePlayer(playerId, email) {
     try {
       const { data, error } = await supabase.functions.invoke("invite-player", {
-        body: { playerId, email, redirectTo: "https://garlandale-player-app.vercel.app/accept-invite.html" },
+        body: { playerId, email, redirectTo: "https://www.gfcplayers.co.za/accept-invite.html" },
       });
       if (error || data?.error) {
         const msg = await extractFunctionErrorMessage(error, data);
@@ -703,9 +763,10 @@ function MainApp({ role, staffId, onLogout }) {
     loadLeagueSources();
     loadLeagueStandings();
     loadFixtures();
+    loadRefereeAppointments();
     loadNotices();
     loadStaffTeams();
-  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings, loadFixtures, loadNotices, loadStaffTeams]);
+  }, [loadPlayers, loadMatches, loadKit, loadTiers, loadBackups, loadClubSettings, loadStaffList, loadDivisionLabels, loadAssets, loadFinanceEntries, loadReminderBatch, loadAuditLog, loadAllSquadStats, loadLeagueSources, loadLeagueStandings, loadFixtures, loadRefereeAppointments, loadNotices, loadStaffTeams]);
 
   useEffect(() => {
     if (activeMatchId) loadMatchSquad(activeMatchId);
@@ -1445,6 +1506,7 @@ function MainApp({ role, staffId, onLogout }) {
             onUpdateJersey={updateSquadJersey}
             onUpdateStats={updateSquadStats}
             fixtures={fixtures}
+            staffList={staffList}
             onSyncFixtures={syncFixturesToMatchday}
           />
         )}
@@ -1494,10 +1556,20 @@ function MainApp({ role, staffId, onLogout }) {
             divisionLabels={divisionLabels}
             role={role}
             ageGroups={ageGroups}
+            staffList={staffList}
             onImportFixtures={importFixtures}
             onSaveDivisionLabel={saveDivisionLabel}
             onSaveFixture={saveFixture}
             onDeleteFixture={deleteFixture}
+          />
+        )}
+
+        {tab === "referee-pay" && (
+          <RefereePayView
+            fixtures={fixtures}
+            staffList={staffList}
+            appointments={refereeAppointments}
+            onUpdateAppointment={updateRefereeAppointment}
           />
         )}
 

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { T } from "../theme.js";
 import { fmtDate } from "../lib/format.js";
 
-export const ROLE_LABEL = { admin: "Admin", treasurer: "Treasurer", coach: "Coach" };
+export const ROLE_LABEL = { admin: "Admin", treasurer: "Treasurer", coach: "Coach", referee: "Referee" };
 
 export function UsersView({ staffList, onInvite, onRemove, busy, message, staffTeams, ageGroups, onSaveStaffTeams }) {
   const [email, setEmail] = useState("");
@@ -42,6 +42,7 @@ export function UsersView({ staffList, onInvite, onRemove, busy, message, staffT
               <option value="admin">Admin (full access)</option>
               <option value="treasurer">Treasurer (financial only)</option>
               <option value="coach">Coach (squad/matchday/kit only)</option>
+              <option value="referee">Referee (fixtures only)</option>
             </select>
           </div>
           <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy}>{busy ? "Sending…" : "Send invite"}</button>
@@ -73,6 +74,8 @@ export function UsersView({ staffList, onInvite, onRemove, busy, message, staffT
                         {" "}
                         <button className="gfc-btn gfc-btn-ghost gfc-btn-sm" onClick={() => setEditingTeamsFor(s)}>Edit</button>
                       </>
+                    ) : s.role === "referee" ? (
+                      <span style={{ color: T.inkSoft }}>N/A</span>
                     ) : (
                       <span style={{ color: T.inkSoft }}>All (not restricted)</span>
                     )}
