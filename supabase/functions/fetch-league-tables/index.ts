@@ -18,6 +18,20 @@
 // is already known from real fetched data, regex is simpler and has zero
 // external dependencies to break in this environment.
 //
+// 2026-08 rewrite: LeagueRepublic rolled out a new site template
+// ("theme4") that changed BOTH the standings page URL and the table
+// itself. The old pages (`/standingsForDate/<id>/2/-1/-1.html`) split
+// stats into Home/Away/Overall column groups (21+ columns/row, fixed
+// positions) - those URLs now return an empty/JS-rendered page, and the
+// new pages (`/fg/<type>_<competitionId>.html`) use a single, much
+// simpler P/W/D/L/F/A/+-/BP/PTS table instead. The parser below now
+// locates columns by reading the header row's own labels (P, W, D, L, F,
+// A, +-, PTS) rather than hardcoding column positions/counts, so a future
+// column reorder won't silently break this again the way the fixed
+// "cells.length < 21" check did. Every URL in league_table_sources needs
+// updating to the new `/fg/...` format for this to work - the old URLs
+// will just keep failing with "Could not find a standings table".
+//
 // Triggered weekly by pg_cron (see schema.sql) - not meant to be called
 // directly by any user action in the app.
 //
@@ -93,31 +107,76 @@ async function parseStandingsPage(url) {
     rows.push(rm[1]);
   }
 
-  // The table has two header rows (a grouping row: Home/Away/Overall, then
-  // the actual column labels: P/W/D/L/F/A repeated) before any data rows.
-  const dataRows = rows.slice(2);
+  // Find the header row - the one whose cells include "PTS" as a label,
+  // rather than assuming it's always the Nth row (the old template had
+  // two header rows above the data; the new one has just one). Locating
+  // it by content, not position, means a future header-row-count change
+  // won't silently break this again.
+  let headerIndex = -1;
+  let headerCells = [];
+  for (let i = 0; i < rows.length; i++) {
+    const cells = extractCells(rows[i]).map((c) => c.trim().toUpperCase());
+    if (cells.includes("PTS")) {
+      headerIndex = i;
+      headerCells = cells;
+      break;
+    }
+  }
+  if (headerIndex === -1) throw new Error("Could not find a header row with PTS in the standings table");
 
+  // Map each known stat label to its column index within the header row,
+  // rather than hardcoding fixed positions - the exact column count/order
+  // has already changed once (2026 site redesign), and this way a future
+  // reorder doesn't silently break parsing again.
+  const colIndex = (label) => headerCells.indexOf(label);
+  const idx = {
+    played: colIndex("P"),
+    won: colIndex("W"),
+    drawn: colIndex("D"),
+    lost: colIndex("L"),
+    goalsFor: colIndex("F"),
+    goalsAgainst: colIndex("A"),
+    goalDifference: colIndex("+-"),
+    points: colIndex("PTS"),
+  };
+  const required = ["played", "won", "drawn", "lost", "goalsFor", "goalsAgainst", "points"];
+  const missing = required.filter((k) => idx[k] === -1);
+  if (missing.length > 0) throw new Error(`Standings table is missing expected column(s): ${missing.join(", ")}`);
+
+  // The team name is whatever's in the first column after position (#) -
+  // deliberately looked up by fixed offset rather than header label, since
+  // that column's header is always blank (it holds the crest + team link,
+  // not a stat name).
+  const teamCol = 1;
+  const maxColNeeded = Math.max(teamCol, ...Object.values(idx));
+
+  const dataRows = rows.slice(headerIndex + 1);
   const standings = [];
   for (const rowHtml of dataRows) {
     const cells = extractCells(rowHtml);
-    if (cells.length < 21) continue; // not a real data row (e.g. a stray footer row)
+    if (cells.length <= maxColNeeded) continue; // not a real data row (e.g. a stray footer row)
 
-    const teamRaw = cells[1];
+    const teamRaw = cells[teamCol];
     if (!teamRaw) continue;
 
-    const num = (i) => parseInt(cells[i], 10) || 0;
+    const num = (i) => (i === -1 ? 0 : parseInt(cells[i], 10) || 0);
+
+    // Position (#) isn't guaranteed numeric for every placeholder row (a
+    // "Bye" entry, for instance) - fall back to null rather than failing
+    // the whole row over a cosmetic column.
+    const posRaw = parseInt(cells[0], 10);
 
     standings.push({
-      position: num(0) || null,
+      position: Number.isFinite(posRaw) ? posRaw : null,
       team_name: stripTeamCode(teamRaw),
-      played: num(2),
-      won: num(13),
-      drawn: num(14),
-      lost: num(15),
-      goals_for: num(16),
-      goals_against: num(17),
-      goal_difference: num(18),
-      points: num(20),
+      played: num(idx.played),
+      won: num(idx.won),
+      drawn: num(idx.drawn),
+      lost: num(idx.lost),
+      goals_for: num(idx.goalsFor),
+      goals_against: num(idx.goalsAgainst),
+      goal_difference: num(idx.goalDifference),
+      points: num(idx.points),
       is_garlandale: isGarlandale(teamRaw),
     });
   }
