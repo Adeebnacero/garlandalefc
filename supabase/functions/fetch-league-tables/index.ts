@@ -32,6 +32,13 @@
 // updating to the new `/fg/...` format for this to work - the old URLs
 // will just keep failing with "Could not find a standings table".
 //
+// Also as of this rewrite: the fetch() call sends browser-like headers
+// (User-Agent/Accept/Accept-Language). Without them, LeagueRepublic's
+// bot protection returns a flat 403 for every request - Deno's default
+// fetch() otherwise sends no User-Agent at all. If fetches start failing
+// with 403 again in future, this is the first thing to check (the header
+// values below may simply need updating to a newer browser string).
+//
 // Triggered weekly by pg_cron (see schema.sql) - not meant to be called
 // directly by any user action in the app.
 //
@@ -83,7 +90,21 @@ function extractCells(rowHtml) {
 }
 
 async function parseStandingsPage(url) {
-  const resp = await fetch(url);
+  // LeagueRepublic's 2026 redesign sits behind bot protection that
+  // rejects requests without a normal browser-looking User-Agent -
+  // Deno's default fetch() sends none, which gets a flat 403 even though
+  // the exact same URL loads fine in an actual browser. Spoofing a
+  // realistic header set is a standard, low-risk fix for this - we're
+  // not bypassing any login/paywall, just avoiding a bot fingerprint
+  // check on a page that's otherwise fully public.
+  const resp = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
   if (!resp.ok) throw new Error(`Fetch failed with status ${resp.status}`);
   const html = await resp.text();
 
