@@ -28,7 +28,7 @@ import {
   toDbNotice,
 } from "./lib/dbMappers.js";
 import { T, GLOBAL_CSS, STATUS_COLOR } from "./theme.js";
-import { sortAgeGroups, computeAgeGroup, isOver40, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
+import { sortAgeGroups, computeAgeGroup, playerFinance, complianceStatus, complianceReason } from "./lib/billing.js";
 import { aggregatePlayerStats } from "./lib/playerStats.js";
 import { todayISO, fmtMoney, fmtDate, digitsOnly } from "./lib/format.js";
 import { waLink, smsLink, fillTemplate, TEMPLATES } from "./lib/messaging.js";
@@ -784,8 +784,7 @@ function MainApp({ role, staffId, onLogout }) {
       const status = complianceStatus(p, tiers);
       const reason = complianceReason(p, tiers);
       const ageGroup = p.ageGroupOverride || computeAgeGroup(p.dob);
-      const over40 = isOver40(p.dob);
-      return { ...p, ...fin, status, reason, ageGroup, over40 };
+      return { ...p, ...fin, status, reason, ageGroup };
     });
   }, [players, tiers]);
 
