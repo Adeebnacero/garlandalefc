@@ -15,10 +15,26 @@
 export const SEASON_START_MONTH = 0; // January (0-indexed)
 export const SEASON_END_MONTH = 9;   // October (0-indexed) - last billable month of the season
 
+// Garlandale FC's real age-group ladder: single-year bands up to U10, then
+// two-year bands from U12 onward. Ages that fall outside every band below
+// (i.e. >= 19) are Seniors, and >= 40 is O40 - see computeAgeGroup().
+// IMPORTANT: keep this in sync with create_birthday_notices() in schema.sql
+// if this list ever changes.
+const AGE_GROUP_BANDS = [
+  { upTo: 7, label: "U7" },
+  { upTo: 8, label: "U8" },
+  { upTo: 9, label: "U9" },
+  { upTo: 10, label: "U10" },
+  { upTo: 12, label: "U12" },
+  { upTo: 14, label: "U14" },
+  { upTo: 16, label: "U16" },
+  { upTo: 18, label: "U18" },
+];
+
 /**
- * Computes a player's age-group label (U7, U8, ... Seniors) from their date
- * of birth, using the English/SA grassroots convention that the age-group
- * cutoff is 31 August each year.
+ * Computes a player's age-group label (U7, U8, ... U18, Seniors, O40) from
+ * their date of birth, using the English/SA grassroots convention that the
+ * age-group cutoff is 31 August each year.
  */
 export function computeAgeGroup(dob, today = new Date()) {
   if (!dob) return "Unassigned";
@@ -30,9 +46,11 @@ export function computeAgeGroup(dob, today = new Date()) {
   // depending on the server/browser's timezone (see billing.test.js).
   const cutoffYear = today.getUTCMonth() >= 8 ? today.getUTCFullYear() + 1 : today.getUTCFullYear();
   const age = cutoffYear - birth.getUTCFullYear();
-  if (age >= 18) return "Seniors";
   if (age <= 0) return "Unassigned";
-  return "U" + age;
+  if (age >= 40) return "O40";
+  if (age >= 19) return "Seniors";
+  const band = AGE_GROUP_BANDS.find((b) => age <= b.upTo);
+  return band ? band.label : "Seniors";
 }
 
 /** Computes a person's exact age in whole years as of `today`. */
@@ -74,9 +92,10 @@ export function yearsOfService(joinDate, today = new Date()) {
   return [yearPart, monthPart].filter(Boolean).join(", ");
 }
 
-/** Sort key used to order age groups sensibly: U7, U8, ... Seniors, Unassigned last. */
+/** Sort key used to order age groups sensibly: U7, U8, ... Seniors, O40, Unassigned last. */
 export function ageGroupSortKey(g) {
-  if (g === "Unassigned") return [3, 0];
+  if (g === "Unassigned") return [4, 0];
+  if (g === "O40") return [3, 0];
   if (g === "Seniors") return [2, 0];
   const m = /^U(\d+)$/.exec(g);
   if (m) return [0, Number(m[1])];

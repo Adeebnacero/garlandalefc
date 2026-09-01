@@ -205,7 +205,6 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
               <div className="gfc-card-foot">
                 <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span className="gfc-agepill">{p.ageGroup}</span>
-                  {p.over40 && <span className="gfc-agepill" style={{ background: T.goldDeep }}>Over 40</span>}
                 </span>
                 {!hideFinancials && (
                   <span className="gfc-card-balance" style={{ color: p.balance > 0 ? T.danger : T.green }}>
@@ -251,7 +250,6 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
                   <td>
                     <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
                       <span className="gfc-agepill">{p.ageGroup}</span>
-                      {p.over40 && <span className="gfc-agepill" style={{ background: T.goldDeep }}>O40</span>}
                     </span>
                   </td>
                   <td style={{ color: p.regNo ? T.ink : T.amber, fontWeight: p.regNo ? 400 : 700 }}>{p.regNo || "Pending"}</td>
