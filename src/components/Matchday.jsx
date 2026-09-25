@@ -3,7 +3,8 @@ import { T } from "../theme.js";
 import { fmtDate, todayISO } from "../lib/format.js";
 import { printTeamSheet } from "../lib/teamSheet.js";
 import { computeMonthOptions, computeMonthRange } from "../lib/dateCascade.js";
-import { usePagination, Pagination } from "./shared.jsx";
+import { usePagination, Pagination, LocationFields } from "./shared.jsx";
+import { checkLocationFields } from "../lib/mapLinks.js";
 
 export function MatchdayView({ matches, enriched, ageGroups, activeMatchId, setActiveMatchId, squad, onAddMatch, onEditMatch, onSetSlot, onUpdateJersey, onUpdateStats, fixtures, staffList, onSyncFixtures }) {
   const activeMatch = matches.find((m) => m.id === activeMatchId) || null;
@@ -351,7 +352,10 @@ export function MatchModal({ match, players, ageGroups, onClose, onSave, onDelet
     comments: match?.comments || "",
     fullTimeScoreHome: match?.fullTimeScoreHome || "",
     fullTimeScoreAway: match?.fullTimeScoreAway || "",
+    locationLink: match?.locationLink || "",
+    locationEmbed: match?.locationEmbed || "",
   }));
+  const [locationError, setLocationError] = useState("");
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -360,7 +364,13 @@ export function MatchModal({ match, players, ageGroups, onClose, onSave, onDelet
   function handleSubmit(e) {
     e.preventDefault();
     if (!form.opponent.trim()) return;
-    onSave(form);
+    const loc = checkLocationFields(form);
+    if (!loc.ok) {
+      setLocationError(loc.errors.link || loc.errors.embed);
+      return;
+    }
+    setLocationError("");
+    onSave({ ...form, locationLink: loc.locationLink, locationEmbed: loc.locationEmbed });
   }
 
   return (
@@ -409,6 +419,8 @@ export function MatchModal({ match, players, ageGroups, onClose, onSave, onDelet
               </select>
             </div>
           </div>
+
+          <LocationFields link={form.locationLink} embed={form.locationEmbed} onChange={update} />
 
           <div className="gfc-row2">
             <div className="gfc-field">
@@ -500,6 +512,7 @@ export function MatchModal({ match, players, ageGroups, onClose, onSave, onDelet
             <textarea className="gfc-textarea" rows={2} value={form.comments} onChange={(e) => update("comments", e.target.value)} />
           </div>
 
+          {locationError && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>{locationError}</div>}
           <div className="gfc-modal-actions">
             {match && (
               <button type="button" className="gfc-btn gfc-btn-danger" style={{ marginRight: "auto" }} onClick={() => onDelete(match.id)}>

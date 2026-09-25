@@ -107,6 +107,8 @@ export function fromDbMatch(row) {
     physioName: row.physio_name || "",
     physioRegNo: row.physio_reg_no || "",
     comments: row.comments || "",
+    locationLink: row.location_link || "",
+    locationEmbed: row.location_embed || "",
   };
 }
 
@@ -141,6 +143,8 @@ export function toDbMatch(form) {
     physio_name: form.physioName || "",
     physio_reg_no: form.physioRegNo || "",
     comments: form.comments || "",
+    location_link: form.locationLink || null,
+    location_embed: form.locationEmbed || null,
   };
 }
 
@@ -278,9 +282,15 @@ export function fromDbFixture(row) {
     venue: row.venue || "",
     homeAway: row.home_away || "H",
     refereeId: row.referee_id || "",
+    locationLink: row.location_link || "",
+    locationEmbed: row.location_embed || "",
   };
 }
 
+// Used by the spreadsheet import. Deliberately leaves out location_link /
+// location_embed, so re-importing the league schedule never wipes a
+// location someone pasted in by hand (the upsert only sets the columns it
+// is given). Single-fixture edits save those via saveFixture() in App.jsx.
 export function toDbFixture(f) {
   return {
     division_key: f.divisionKey || "",
@@ -323,6 +333,8 @@ export function fromDbNotice(row) {
     postedBy: row.posted_by || "",
     targetAgeGroup: row.target_age_group || "ALL",
     postedAt: row.posted_at,
+    locationLink: row.location_link || "",
+    locationEmbed: row.location_embed || "",
   };
 }
 
@@ -342,5 +354,7 @@ export function toDbNotice(form, staffId) {
     pinned: !!form.pinned,
     posted_by: staffId,
     target_age_group: !form.targetAgeGroup || form.targetAgeGroup === "ALL" ? null : form.targetAgeGroup,
+    location_link: form.locationLink || null,
+    location_embed: form.locationEmbed || null,
   };
 }

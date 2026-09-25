@@ -280,11 +280,22 @@ function MainApp({ role, staffId, onLogout }) {
           division: f.divisionKey || "",
         };
         if (existing) {
-          const { error } = await supabase.from("matches").update(basicFields).eq("id", existing.id);
+          // A location is only copied onto an existing Matchday entry if
+          // that entry doesn't have its own yet, so a location a coach set
+          // directly on the Matchday entry is never overwritten.
+          const locationFields = {};
+          if (f.locationLink && !existing.locationLink) locationFields.location_link = f.locationLink;
+          if (f.locationEmbed && !existing.locationEmbed) locationFields.location_embed = f.locationEmbed;
+          const { error } = await supabase.from("matches").update({ ...basicFields, ...locationFields }).eq("id", existing.id);
           if (error) throw error;
           updated++;
         } else {
-          const { error } = await supabase.from("matches").insert({ ...basicFields, fixture_id: f.id });
+          const { error } = await supabase.from("matches").insert({
+            ...basicFields,
+            location_link: f.locationLink || null,
+            location_embed: f.locationEmbed || null,
+            fixture_id: f.id,
+          });
           if (error) throw error;
           created++;
         }
@@ -317,6 +328,8 @@ function MainApp({ role, staffId, onLogout }) {
             venue: form.venue || "",
             home_away: form.homeAway || "H",
             referee_id: form.refereeId || null,
+            location_link: form.locationLink || null,
+            location_embed: form.locationEmbed || null,
             updated_at: new Date().toISOString(),
           })
           .eq("id", form.id);
@@ -339,6 +352,8 @@ function MainApp({ role, staffId, onLogout }) {
           venue: form.venue || "",
           home_away: form.homeAway || "H",
           referee_id: form.refereeId || null,
+          location_link: form.locationLink || null,
+          location_embed: form.locationEmbed || null,
         });
         if (error) throw error;
       }

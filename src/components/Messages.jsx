@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { T } from "../theme.js";
 import { waLink, smsLink, fillTemplate, TEMPLATES } from "../lib/messaging.js";
-import { Badge } from "./shared.jsx";
+import { Badge, LocationFields } from "./shared.jsx";
+import { checkLocationFields } from "../lib/mapLinks.js";
 
 const CATEGORY_LABELS = { announcement: "Announcement", training: "Training", birthday: "🎂 Birthday" };
 
@@ -272,7 +273,12 @@ function NoticeBoardSection({ notices, role, staffId, onAdd, onEdit }) {
               const editable = canEdit(n);
               return (
                 <tr key={n.id} className={editable ? "clickable" : ""} onClick={() => editable && onEdit(n)}>
-                  <td style={{ fontWeight: 600 }}>{n.title}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    {n.title}
+                    {(n.locationLink || n.locationEmbed) && (
+                      <span title="Includes a location for the Player Portal" style={{ marginLeft: 4 }}>📍</span>
+                    )}
+                  </td>
                   <td><span className="gfc-agepill">{CATEGORY_LABELS[n.category] || n.category}</span></td>
                   <td><span className="gfc-agepill" style={{ background: T.indigoSoft }}>{n.targetAgeGroup || "ALL"}</span></td>
                   <td>{n.pinned ? "📌 Yes" : "—"}</td>
@@ -311,6 +317,8 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
     category: notice?.category || "announcement",
     pinned: notice?.pinned || false,
     targetAgeGroup: notice?.targetAgeGroup || (isAdminOrTreasurer ? "ALL" : myTeams[0] || ""),
+    locationLink: notice?.locationLink || "",
+    locationEmbed: notice?.locationEmbed || "",
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -322,9 +330,14 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.title.trim() || !form.body.trim() || !form.targetAgeGroup) return;
+    const loc = checkLocationFields(form);
+    if (!loc.ok) {
+      setError(loc.errors.link || loc.errors.embed);
+      return;
+    }
     setBusy(true);
     setError("");
-    const result = await onSave(form);
+    const result = await onSave({ ...form, locationLink: loc.locationLink, locationEmbed: loc.locationEmbed });
     if (result?.error) setError(result.error);
     else onClose();
     setBusy(false);
@@ -376,6 +389,7 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
               You don't have any teams assigned yet — ask an Admin to assign you one in Users before you can post.
             </div>
           )}
+          <LocationFields link={form.locationLink} embed={form.locationEmbed} onChange={update} />
           <div className="gfc-field">
             <label className="gfc-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <input type="checkbox" checked={form.pinned} onChange={(e) => update("pinned", e.target.checked)} />

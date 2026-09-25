@@ -8,7 +8,8 @@ import {
   formatDisplayTime,
 } from "../lib/fixtureImport.js";
 import { MONTH_NAMES, computeAvailableYears, filterByMonth } from "../lib/dateCascade.js";
-import { usePagination, Pagination } from "./shared.jsx";
+import { usePagination, Pagination, LocationFields } from "./shared.jsx";
+import { checkLocationFields } from "../lib/mapLinks.js";
 
 function cleanDivisionGuess(text) {
   return String(text || "").replace(/^[A-Za-z0-9]+\s*-\s*/, "").trim();
@@ -287,7 +288,12 @@ export function FixturesView({ fixtures, divisionLabels, role, ageGroups, staffL
                   <td className="gfc-mono">{formatDisplayTime(f.kickoffTime)}</td>
                   <td style={{ fontWeight: 600 }}>{f.squadAgeGroup || f.teamLabel || f.divisionKey}</td>
                   <td>{f.opponent}</td>
-                  <td>{f.venue}</td>
+                  <td>
+                    {f.venue}
+                    {(f.locationLink || f.locationEmbed) && (
+                      <span title="Location added for the Player Portal" style={{ marginLeft: 4 }}>📍</span>
+                    )}
+                  </td>
                   <td>{f.homeAway}</td>
                   <td style={{ fontSize: 12 }}>
                     {f.refereeId ? (refereeEmailById[f.refereeId] || "Unknown") : <span style={{ color: T.inkSoft }}>Unassigned</span>}
@@ -329,6 +335,8 @@ function FixtureModal({ fixture, ageGroups, refereeOptions, onClose, onSave, onD
     venue: fixture?.venue || "",
     homeAway: fixture?.homeAway || "H",
     refereeId: fixture?.refereeId || "",
+    locationLink: fixture?.locationLink || "",
+    locationEmbed: fixture?.locationEmbed || "",
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -340,9 +348,14 @@ function FixtureModal({ fixture, ageGroups, refereeOptions, onClose, onSave, onD
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.opponent.trim() || !form.matchDate) return;
+    const loc = checkLocationFields(form);
+    if (!loc.ok) {
+      setError(loc.errors.link || loc.errors.embed);
+      return;
+    }
     setBusy(true);
     setError("");
-    const result = await onSave(form);
+    const result = await onSave({ ...form, locationLink: loc.locationLink, locationEmbed: loc.locationEmbed });
     if (result?.error) setError(result.error);
     setBusy(false);
   }
@@ -407,6 +420,7 @@ function FixtureModal({ fixture, ageGroups, refereeOptions, onClose, onSave, onD
               </select>
             </div>
           </div>
+          <LocationFields link={form.locationLink} embed={form.locationEmbed} onChange={update} />
           {error && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 10 }}>{error}</div>}
           <div className="gfc-modal-actions">
             {fixture && (
