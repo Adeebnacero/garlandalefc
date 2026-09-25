@@ -508,9 +508,45 @@ function MainApp({ role, staffId, onLogout }) {
       // The account can be successfully linked even if the invite email
       // itself failed to send - surface both, so the UI never claims
       // "invite sent" when it wasn't.
-      return { success: true, emailSent: !!data.emailSent, emailError: data.emailError || null };
+      return {
+        success: true,
+        emailSent: !!data.emailSent,
+        emailError: data.emailError || null,
+        alreadyRegistered: !!data.alreadyRegistered,
+        alreadyLinked: !!data.alreadyLinked,
+      };
     } catch (e) {
       return { error: e.message || "Failed to send app invite." };
+    }
+  }
+
+  // Lists every Player Portal login linked to a player (e.g. both
+  // parents). Goes through an Edge Function because login emails and
+  // activation status live in Supabase Auth, not a public table.
+  async function listPlayerGuardians(playerId) {
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-player-guardians", {
+        body: { action: "list", playerId },
+      });
+      if (error || data?.error) throw new Error(await extractFunctionErrorMessage(error, data));
+      return { accounts: data.accounts || [] };
+    } catch (e) {
+      return { error: e.message || "Could not load linked accounts." };
+    }
+  }
+
+  // Unlinks ONE login from ONE player. The login itself is kept, since it
+  // may also be linked to a sibling or belong to a staff member.
+  async function removePlayerGuardian(playerId, authUserId) {
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-player-guardians", {
+        body: { action: "remove", playerId, authUserId },
+      });
+      if (error || data?.error) throw new Error(await extractFunctionErrorMessage(error, data));
+      await loadPlayers();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not remove access." };
     }
   }
 
@@ -584,7 +620,7 @@ function MainApp({ role, staffId, onLogout }) {
     try {
       const { data: rows, error } = await supabase
         .from("players")
-        .select("*, payments(*), player_status_log(*)")
+        .select("*, payments(*), player_status_log(*), guardian_players(auth_user_id)")
         .order("name", { ascending: true });
       if (error) throw error;
       setPlayers((rows || []).map(fromDbPlayer));
@@ -1633,6 +1669,8 @@ function MainApp({ role, staffId, onLogout }) {
           onDelete={deletePlayer}
           onManageTiers={() => setManagingTiers(true)}
           onInvitePlayer={invitePlayer}
+          onListGuardians={listPlayerGuardians}
+          onRemoveGuardian={removePlayerGuardian}
         />
       )}
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { T, STATUS_COLOR } from "../theme.js";
 import { computeAgeGroup, yearsOfService } from "../lib/billing.js";
 import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
@@ -277,12 +277,12 @@ export function SquadView({ filtered, ageGroups, ageFilter, setAgeFilter, status
 
 // The player-facing app is paused for now - flip this back to true to
 // restore the "App account" invite/resend section on a player's profile.
-// Nothing else needs to change: the underlying user_id column,
-// current_player_id(), and the invite-player Edge Function all stay in
-// place either way.
+// Nothing else needs to change: guardian_players, current_player_ids(),
+// and the invite-player / manage-player-guardians Edge Functions all stay
+// in place either way.
 const PLAYER_APP_INVITE_ENABLED = true;
 
-export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers, onInvitePlayer }) {
+export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManageTiers, onInvitePlayer, onListGuardians, onRemoveGuardian }) {
   const [form, setForm] = useState(() => ({
     id: player?.id || "",
     name: player?.name || "",
@@ -302,28 +302,6 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
     active: player?.active ?? true,
   }));
   const [regNoError, setRegNoError] = useState("");
-
-  const [inviteEmail, setInviteEmail] = useState(player?.email || "");
-  const [inviteBusy, setInviteBusy] = useState(false);
-  const [inviteMessage, setInviteMessage] = useState("");
-
-  async function handleInvite() {
-    if (!inviteEmail.trim()) {
-      setInviteMessage("Enter an email address first.");
-      return;
-    }
-    setInviteBusy(true);
-    setInviteMessage("");
-    const result = await onInvitePlayer(player.id, inviteEmail.trim());
-    if (result?.error) {
-      setInviteMessage(result.error);
-    } else if (result.emailSent) {
-      setInviteMessage(`Invite email sent to ${inviteEmail.trim()}.`);
-    } else {
-      setInviteMessage(`Account created, but the invite email couldn't be sent (${result.emailError || "unknown reason"}). Try resending, or check the SMTP setup in Settings.`);
-    }
-    setInviteBusy(false);
-  }
 
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
@@ -465,36 +443,12 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
           </div>
 
           {PLAYER_APP_INVITE_ENABLED && player && (
-            <div style={{ marginTop: 16, background: T.paperDim, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: T.indigo, marginBottom: 8 }}>
-                App account
-              </div>
-              {player.hasAppAccount && (
-                <div style={{ fontSize: 12.5, color: T.green, fontWeight: 600, marginBottom: 10 }}>
-                  ✓ Account created — an invite email has been sent at least once. If they never received it, you can resend below.
-                </div>
-              )}
-              <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 8 }}>
-                {player.hasAppAccount
-                  ? "Resend if they lost the email, it went to spam, or an earlier attempt failed to send."
-                  : "Send an invite so this player can create their own account for the app."}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  className="gfc-input"
-                  style={{ flex: 1 }}
-                  placeholder="player@email.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                />
-                <button type="button" className="gfc-btn gfc-btn-outline" onClick={handleInvite} disabled={inviteBusy}>
-                  {inviteBusy ? "Sending…" : player.hasAppAccount ? "Resend invite" : "Send app invite"}
-                </button>
-              </div>
-              {inviteMessage && (
-                <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 6, fontWeight: 600 }}>{inviteMessage}</div>
-              )}
-            </div>
+            <AppAccessPanel
+              player={player}
+              onInvite={onInvitePlayer}
+              onList={onListGuardians}
+              onRemove={onRemoveGuardian}
+            />
           )}
 
           <div className="gfc-modal-actions">
@@ -508,6 +462,146 @@ export function PlayerModal({ player, tiers, onClose, onSave, onDelete, onManage
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+/* ---------- APP ACCESS PANEL (inside PlayerModal) ---------- */
+
+// Keep in sync with MAX_ACCOUNTS_PER_PLAYER in the invite-player Edge
+// Function. The function is what actually enforces the limit; this only
+// hides the invite box once the limit is reached.
+const MAX_APP_ACCOUNTS_PER_PLAYER = 2;
+
+// Shows every Player Portal login linked to this player (typically one or
+// two guardians), whether each has activated their account, and lets staff
+// resend, add another guardian, or remove a login's access.
+function AppAccessPanel({ player, onInvite, onList, onRemove }) {
+  const [accounts, setAccounts] = useState(null); // null = loading
+  const [loadError, setLoadError] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [busy, setBusy] = useState(""); // "" | "invite" | authUserId | email
+  const [message, setMessage] = useState("");
+
+  const refresh = useCallback(async () => {
+    if (!onList) { setAccounts([]); return; }
+    const res = await onList(player.id);
+    if (res?.error) { setLoadError(res.error); setAccounts([]); }
+    else { setLoadError(""); setAccounts(res.accounts); }
+  }, [onList, player.id]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  // Pre-fill the invite box with the player's own email only when nobody
+  // is linked yet - for a second guardian it's always a different address.
+  useEffect(() => {
+    if (accounts && accounts.length === 0 && !newEmail) setNewEmail(player.email || "");
+  }, [accounts]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function describeInviteResult(email, result) {
+    if (result?.error) return result.error;
+    if (result.emailSent) return `Invite email sent to ${email}.`;
+    if (result.emailError) return `Linked ${email}, but the invite email couldn't be sent (${result.emailError}). Try resending, or check the SMTP setup in Settings.`;
+    if (result.alreadyRegistered) return `${email} already has an app login, so no email was needed - they'll see ${player.name} next time they open the app.`;
+    return `Linked ${email}.`;
+  }
+
+  async function sendInvite(email, busyKey) {
+    const clean = email.trim();
+    if (!clean) { setMessage("Enter an email address first."); return; }
+    setBusy(busyKey);
+    setMessage("");
+    const result = await onInvite(player.id, clean);
+    setMessage(describeInviteResult(clean, result));
+    if (!result?.error && busyKey === "invite") setNewEmail("");
+    await refresh();
+    setBusy("");
+  }
+
+  async function removeAccount(acc) {
+    const ok = window.confirm(
+      `Remove ${acc.email}'s access to ${player.name} in the Player Portal?\n\n` +
+      "Their login is kept, so any other children linked to it are unaffected."
+    );
+    if (!ok) return;
+    setBusy(acc.authUserId);
+    setMessage("");
+    const result = await onRemove(player.id, acc.authUserId);
+    setMessage(result?.error ? result.error : `Removed ${acc.email}.`);
+    await refresh();
+    setBusy("");
+  }
+
+  const atLimit = accounts && accounts.length >= MAX_APP_ACCOUNTS_PER_PLAYER;
+
+  return (
+    <div style={{ marginTop: 16, background: T.paperDim, border: `1px solid ${T.line}`, borderRadius: 8, padding: 14 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: T.indigo, marginBottom: 4 }}>
+        App access
+      </div>
+      <div style={{ fontSize: 11.5, color: T.inkSoft, marginBottom: 10 }}>
+        Up to {MAX_APP_ACCOUNTS_PER_PLAYER} logins can see this player in the Player Portal - for example, each parent on their own email.
+      </div>
+
+      {accounts === null && <div style={{ fontSize: 12, color: T.inkSoft }}>Loading linked accounts…</div>}
+      {loadError && <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, marginBottom: 8 }}>{loadError}</div>}
+
+      {accounts && accounts.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+          {accounts.map((acc) => (
+            <div key={acc.authUserId} style={{
+              display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+              background: "#fff", border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 10px",
+            }}>
+              <div style={{ flex: 1, minWidth: 160 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, wordBreak: "break-all" }}>{acc.email}</div>
+                <div style={{ fontSize: 11, color: acc.activated ? T.green : T.inkSoft, marginTop: 2 }}>
+                  {acc.activated
+                    ? (acc.lastSignInAt ? `Active · last signed in ${fmtDate(acc.lastSignInAt.slice(0, 10))}` : "Active")
+                    : "Invite sent · not accepted yet"}
+                </div>
+              </div>
+              {!acc.activated && (
+                <button type="button" className="gfc-btn gfc-btn-outline gfc-btn-sm"
+                  disabled={!!busy} onClick={() => sendInvite(acc.email, acc.email)}>
+                  {busy === acc.email ? "Sending…" : "Resend"}
+                </button>
+              )}
+              {onRemove && (
+                <button type="button" className="gfc-btn gfc-btn-ghost gfc-btn-sm"
+                  disabled={!!busy} onClick={() => removeAccount(acc)}>
+                  {busy === acc.authUserId ? "Removing…" : "Remove"}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {accounts && !atLimit && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            className="gfc-input"
+            style={{ flex: 1 }}
+            type="email"
+            placeholder={accounts.length === 0 ? "guardian@email.com" : "second guardian's email"}
+            value={newEmail}
+            onChange={(e) => setNewEmail(e.target.value)}
+          />
+          <button type="button" className="gfc-btn gfc-btn-outline" disabled={!!busy} onClick={() => sendInvite(newEmail, "invite")}>
+            {busy === "invite" ? "Sending…" : accounts.length === 0 ? "Send app invite" : "Add guardian"}
+          </button>
+        </div>
+      )}
+      {atLimit && (
+        <div style={{ fontSize: 11.5, color: T.inkSoft }}>
+          Maximum reached. Remove an account above to invite someone else.
+        </div>
+      )}
+
+      {message && (
+        <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 8, fontWeight: 600 }}>{message}</div>
+      )}
     </div>
   );
 }

@@ -24,7 +24,12 @@ export function fromDbPlayer(row) {
     squadNumber: row.squad_number === null || row.squad_number === undefined ? "" : row.squad_number,
     tierId: row.tier_id || "",
     active: row.active === false ? false : true,
-    hasAppAccount: !!row.user_id,
+    // Number of Player Portal logins linked to this player (guardians, or
+    // the player themselves). Comes from the guardian_players join table;
+    // falls back to the legacy players.user_id column for rows loaded
+    // without that embed.
+    appAccountCount: Array.isArray(row.guardian_players) ? row.guardian_players.length : (row.user_id ? 1 : 0),
+    hasAppAccount: Array.isArray(row.guardian_players) ? row.guardian_players.length > 0 : !!row.user_id,
     statusLog: (row.player_status_log || []).map((s) => ({ id: s.id, status: s.status, changedAt: s.changed_at })),
     payments: (row.payments || [])
       .map((p) => ({ id: p.id, amount: Number(p.amount), date: p.date, method: p.method }))
