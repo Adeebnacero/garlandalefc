@@ -153,3 +153,78 @@ describe("friendlyStoreError", () => {
     expect(friendlyStoreError({ message: "TypeError: Failed to fetch" })).toMatch(/connection/);
   });
 });
+
+import {
+  fromDbOrder, groupStatus, orderStatus, nextStep, orderStats, supplierSummary, filterOrders, ordersToCsv,
+} from "./store.js";
+
+function order(overrides = {}, lines = []) {
+  return {
+    id: "o1", number: "GFC-2026-0001", paidAt: "2026-09-20T10:00:00Z", guardianName: "Nadia Adams",
+    guardianPhone: "082 555 0142", guardianEmail: "nadia@example.com", subtotal: 450, adminFee: 15.75,
+    adminFeePercent: 3.5, total: 465.75, refundedTotal: 0, yocoPaymentId: "p_1", needsAttention: false,
+    attentionNote: "", events: [], lines, ...overrides,
+  };
+}
+const L = (o) => ({ productId: "p", name: "Home jersey", size: "M", quantity: 1, unitPrice: 450, isPreorder: false, status: "paid", ...o });
+
+describe("orders", () => {
+  it("maps rows and sorts lines and history", () => {
+    const o = fromDbOrder({ id: "x", order_number: "GFC-2026-0002", subtotal: "85.00", admin_fee: "2.98", admin_fee_percent: "3.50", total: "87.98",
+      refunded_total: "0", store_order_items: [{ product_name: "B", sort_order: 2, unit_price: "1", quantity: 1, status: "paid" }, { product_name: "A", sort_order: 1, unit_price: "1", quantity: 1, status: "paid" }],
+      store_order_events: [{ created_at: "2026-09-02", message: "second" }, { created_at: "2026-09-01", message: "first" }] });
+    expect(o.lines.map((l) => l.name)).toEqual(["A", "B"]);
+    expect(o.events.map((e) => e.message)).toEqual(["first", "second"]);
+    expect(o.total).toBe(87.98);
+  });
+  it("works out statuses and next steps", () => {
+    expect(groupStatus([L({ isPreorder: true })])).toBe("prepaid");
+    expect(orderStatus(order({}, [L(), L({ isPreorder: true })]))).toBe("paid");
+    expect(orderStatus(order({}, [L({ status: "ready" }), L({ isPreorder: true, status: "supplier" })]))).toBe("ready");
+    expect(orderStatus(order({}, [L({ isPreorder: true })]))).toBe("prepaid");
+    expect(orderStatus(order({}, [L({ status: "collected" }), L({ status: "refunded" })]))).toBe("collected");
+    expect(nextStep([L()]).to).toBe("ready");
+    expect(nextStep([L({ isPreorder: true })]).to).toBe("supplier");
+    expect(nextStep([L({ status: "ready" })]).to).toBe("collected");
+    expect(nextStep([L({ status: "collected" })])).toBeNull();
+  });
+  it("counts stats for this month, net of refunds", () => {
+    const s = orderStats([
+      order({ needsAttention: true }, [L(), L({ isPreorder: true, quantity: 2 })]),
+      order({ paidAt: "2026-08-30T10:00:00Z" }, [L({ status: "ready" })]),
+      order({ refundedTotal: 100 }, [L({ status: "collected" })]),
+    ], "2026-09");
+    expect(s).toEqual({ toPrepare: 1, waiting: 1, preorderItems: 2, attention: 1, sales: 831.5 });
+  });
+  it("totals open pre-orders by product and size", () => {
+    const s = supplierSummary([
+      order({}, [L({ isPreorder: true, productId: "away", name: "Away", size: "S" }), L({ isPreorder: true, productId: "away", name: "Away", size: "M", quantity: 2 })]),
+      order({}, [L({ isPreorder: true, productId: "away", name: "Away", size: "S" }), L({ isPreorder: true, productId: "away", status: "supplier" })]),
+    ]);
+    expect(s).toEqual([{ productId: "away", name: "Away", total: 4, sizes: [{ size: "S", quantity: 2 }, { size: "M", quantity: 2 }] }]);
+  });
+  it("filters by status, period and search (including phone digits)", () => {
+    const list = [
+      order({ id: "a" }, [L()]),
+      order({ id: "b", guardianName: "Riaan Jacobs", guardianPhone: "083 214 7788", paidAt: "2026-05-01T00:00:00Z" }, [L({ status: "collected" })]),
+      order({ id: "c", needsAttention: true }, [L({ isPreorder: true })]),
+    ];
+    const ids = (f) => filterOrders(list, f, "2026-09-25").map((o) => o.id);
+    expect(ids({ status: "open" })).toEqual(["a", "c"]);
+    expect(ids({ status: "all", q: "riaan" })).toEqual(["b"]);
+    expect(ids({ status: "all", q: "0832147788" })).toEqual(["b"]);
+    expect(ids({ status: "all", q: "214 77" })).toEqual(["b"]);
+    expect(ids({ status: "prepaid" })).toEqual(["c"]);
+    expect(ids({ status: "attention" })).toEqual(["c"]);
+    expect(ids({ status: "all", period: "3m" })).toEqual(["a", "c"]);
+  });
+  it("exports CSV safely", () => {
+    const csv = ordersToCsv([order({ guardianName: '=HYPERLINK("x")', guardianEmail: "a,b@x.co" }, [L({ size: "" })])]);
+    const lines = csv.trim().split("\r\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0].startsWith("Order,Paid on,Guardian")).toBe(true);
+    expect(lines[1]).toContain(`"'=HYPERLINK(""x"")"`);
+    expect(lines[1]).toContain('"a,b@x.co"');
+    expect(lines[1]).toContain("450.00,450.00,No,Paid,450.00,15.75,465.75,0.00,p_1");
+  });
+});

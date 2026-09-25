@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { supabase } from "../supabaseClient";
-import { fromDbProduct, photoTargetSize, photoPath, PHOTO_MAX_DIMENSION } from "./store.js";
+import { fromDbProduct, fromDbOrder, photoTargetSize, photoPath, PHOTO_MAX_DIMENSION } from "./store.js";
 
 export const PHOTO_BUCKET = "store-photos";
 
@@ -129,3 +129,39 @@ export async function saveSettings(settings) {
   if (error) throw error;
   return data;
 }
+
+// ---------------------------------------------------------------------------
+// Orders (Drop 2). Orders are read directly (staff-only row-level
+// security) and changed only through the store_* database functions,
+// which check permissions and write each change to the order's history.
+// ---------------------------------------------------------------------------
+
+/** Paid orders, newest first, with their lines and history. */
+export async function loadOrders() {
+  const { data, error } = await supabase
+    .from("store_orders")
+    .select("*, store_order_items(*), store_order_events(*)")
+    .eq("status", "paid")
+    .order("paid_at", { ascending: false })
+    .limit(1000);
+  if (error) throw error;
+  return (data || []).map(fromDbOrder);
+}
+
+async function rpc(name, args) {
+  const { data, error } = await supabase.rpc(name, args);
+  if (error) throw error;
+  return data;
+}
+
+export const advanceItems = (orderId, preorder, to) =>
+  rpc("store_advance_items", { p_order_id: orderId, p_preorder: preorder, p_to: to });
+
+export const markSupplierOrdered = (productId) =>
+  rpc("store_mark_supplier_ordered", { p_product_id: productId });
+
+export const recordRefund = (orderId, amount, reason) =>
+  rpc("store_record_refund", { p_order_id: orderId, p_amount: amount, p_reason: reason });
+
+export const resolveAttention = (orderId, note) =>
+  rpc("store_resolve_attention", { p_order_id: orderId, p_note: note || "" });

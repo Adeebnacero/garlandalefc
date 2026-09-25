@@ -299,6 +299,177 @@ export function photoPath(productId, now = Date.now()) {
   return `${productId}/${now}.jpg`;
 }
 
+// ---------------------------------------------------------------------------
+// Orders (Drop 2)
+// ---------------------------------------------------------------------------
+
+/** Turns a store_orders row (with items and events embedded) into the app's shape. */
+export function fromDbOrder(row) {
+  const lines = (row.store_order_items || [])
+    .slice()
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((l) => ({
+      id: l.id,
+      productId: l.product_id,
+      sizeId: l.size_id,
+      name: l.product_name,
+      size: l.size_label || "",
+      quantity: l.quantity,
+      unitPrice: Number(l.unit_price),
+      isPreorder: !!l.is_preorder,
+      status: l.status,
+      stockShort: !!l.stock_short,
+    }));
+  const events = (row.store_order_events || [])
+    .slice()
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+    .map((e) => ({ at: e.created_at, message: e.message, by: e.actor_email || "" }));
+  return {
+    id: row.id,
+    number: row.order_number || "",
+    paidAt: row.paid_at,
+    guardianName: row.guardian_name,
+    guardianPhone: row.guardian_phone,
+    guardianEmail: row.guardian_email,
+    subtotal: Number(row.subtotal),
+    adminFee: Number(row.admin_fee),
+    adminFeePercent: Number(row.admin_fee_percent),
+    total: Number(row.total),
+    refundedTotal: Number(row.refunded_total || 0),
+    yocoPaymentId: row.yoco_payment_id || "",
+    needsAttention: !!row.needs_attention,
+    attentionNote: row.attention_note || "",
+    lines,
+    events,
+  };
+}
+
+/**
+ * Status of a group of lines (all in-stock or all pre-order lines of one
+ * order). "prepaid" is a paid pre-order line that hasn't been ordered from
+ * the supplier yet.
+ */
+export function groupStatus(lines) {
+  if (!lines.length) return null;
+  const s = lines[0].status;
+  return s === "paid" && lines[0].isPreorder ? "prepaid" : s;
+}
+
+/** Overall status of an order, for the list. */
+export function orderStatus(order) {
+  const ls = order.lines;
+  if (ls.length && ls.every((l) => l.status === "refunded")) return "refunded";
+  if (ls.length && ls.every((l) => l.status === "collected" || l.status === "refunded")) return "collected";
+  if (ls.some((l) => l.status === "paid" && !l.isPreorder)) return "paid";
+  if (ls.some((l) => l.status === "ready")) return "ready";
+  if (ls.some((l) => l.status === "supplier")) return "supplier";
+  return "prepaid";
+}
+
+export const isOpenOrder = (order) => !["collected", "refunded"].includes(orderStatus(order));
+
+/** The next step for a group of lines, or null when there isn't one. */
+export function nextStep(lines) {
+  const s = lines.length ? lines[0].status : null;
+  const pre = lines.length ? lines[0].isPreorder : false;
+  if (s === "paid") return pre ? { to: "supplier", label: "Mark as ordered from supplier" } : { to: "ready", label: "Mark as ready for collection" };
+  if (s === "supplier") return { to: "ready", label: "Mark as ready for collection" };
+  if (s === "ready") return { to: "collected", label: "Mark as collected" };
+  return null;
+}
+
+const monthKey = (iso) => String(iso || "").slice(0, 7);
+
+/** Figures for the stat cards above the orders list. thisMonth is "YYYY-MM". */
+export function orderStats(orders, thisMonth) {
+  let toPrepare = 0, waiting = 0, preorderItems = 0, attention = 0, sales = 0;
+  for (const o of orders) {
+    if (o.lines.some((l) => l.status === "paid" && !l.isPreorder)) toPrepare++;
+    if (o.lines.some((l) => l.status === "ready")) waiting++;
+    preorderItems += o.lines.filter((l) => l.isPreorder && l.status === "paid").reduce((a, l) => a + l.quantity, 0);
+    if (o.needsAttention) attention++;
+    if (monthKey(o.paidAt) === thisMonth) sales += o.total - o.refundedTotal;
+  }
+  return { toPrepare, waiting, preorderItems, attention, sales: Math.round(sales * 100) / 100 };
+}
+
+/**
+ * Open pre-orders still to be placed with the supplier, per product:
+ * [{ productId, name, total, sizes: [{ size, quantity }] }], sizes in the
+ * order first seen.
+ */
+export function supplierSummary(orders) {
+  const byProduct = new Map();
+  for (const o of orders) {
+    for (const l of o.lines) {
+      if (!l.isPreorder || l.status !== "paid" || !l.productId) continue;
+      if (!byProduct.has(l.productId)) byProduct.set(l.productId, { productId: l.productId, name: l.name, total: 0, sizes: new Map() });
+      const entry = byProduct.get(l.productId);
+      entry.total += l.quantity;
+      const key = l.size || "No size";
+      entry.sizes.set(key, (entry.sizes.get(key) || 0) + l.quantity);
+    }
+  }
+  return [...byProduct.values()].map((e) => ({
+    productId: e.productId, name: e.name, total: e.total,
+    sizes: [...e.sizes.entries()].map(([size, quantity]) => ({ size, quantity })),
+  }));
+}
+
+/**
+ * Filters the orders list. filter: { q, status, period } where status is
+ * open | all | attention | paid | prepaid | supplier | ready | collected |
+ * refunded, and period is all | month | 3m. today is "YYYY-MM-DD".
+ */
+export function filterOrders(orders, filter, today) {
+  const q = String(filter.q || "").trim().toLowerCase();
+  const digits = q.replace(/\D/g, "");
+  const since3m = (() => { const d = new Date(today + "T00:00:00"); d.setMonth(d.getMonth() - 3); return d.toISOString().slice(0, 10); })();
+  return orders.filter((o) => {
+    const st = filter.status || "open";
+    if (st === "open" && !isOpenOrder(o)) return false;
+    if (st === "attention" && !o.needsAttention) return false;
+    if (!["open", "all", "attention"].includes(st)) {
+      if (!o.lines.some((l) => (l.status === "paid" && l.isPreorder ? "prepaid" : l.status) === st)) return false;
+    }
+    if (filter.period === "month" && monthKey(o.paidAt) !== today.slice(0, 7)) return false;
+    if (filter.period === "3m" && String(o.paidAt || "").slice(0, 10) < since3m) return false;
+    if (q) {
+      const hay = [o.number, o.guardianName, o.guardianEmail].join(" ").toLowerCase();
+      const phoneMatch = digits.length >= 3 && String(o.guardianPhone || "").replace(/\D/g, "").includes(digits);
+      if (!hay.includes(q) && !phoneMatch) return false;
+    }
+    return true;
+  });
+}
+
+const csvCell = (v) => {
+  const s = v === null || v === undefined ? "" : String(v);
+  // Guard against spreadsheet formula injection from names typed by guardians.
+  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
+
+/** One row per order line, ready to save as a .csv file. */
+export function ordersToCsv(orders) {
+  const LABEL = { paid: "Paid", supplier: "Ordered from supplier", ready: "Ready for collection", collected: "Collected", refunded: "Refunded" };
+  const rows = [[
+    "Order", "Paid on", "Guardian", "Phone", "Email", "Product", "Size", "Quantity", "Unit price", "Line total",
+    "Pre-order", "Line status", "Order items total", "Admin fee", "Order total", "Refunded", "Yoco payment",
+  ]];
+  for (const o of orders) {
+    for (const l of o.lines) {
+      rows.push([
+        o.number, String(o.paidAt || "").slice(0, 10), o.guardianName, o.guardianPhone, o.guardianEmail,
+        l.name, l.size, l.quantity, l.unitPrice.toFixed(2), (l.unitPrice * l.quantity).toFixed(2),
+        l.isPreorder ? "Yes" : "No", LABEL[l.status] || l.status,
+        o.subtotal.toFixed(2), o.adminFee.toFixed(2), o.total.toFixed(2), o.refundedTotal.toFixed(2), o.yocoPaymentId,
+      ]);
+    }
+  }
+  return rows.map((r) => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
 /** Turns database errors into messages staff can act on. */
 export function friendlyStoreError(err) {
   const msg = String(err?.message || err || "");
@@ -308,6 +479,7 @@ export function friendlyStoreError(err) {
   }
   if (code === "42501" || /permission/i.test(msg)) return "You don’t have permission to manage the store.";
   if (/store_product_sizes_label_uq/.test(msg)) return "Each size can only be listed once.";
+  if (/store_order_items_product_id_fkey/.test(msg) || code === "23503") return "This product has paid orders, so it can’t be deleted. Hide it instead to take it out of the shop.";
   if (/store_products_price_check/.test(msg)) return "Enter a price between R0.01 and R100,000.";
   if (/store_settings_fee_check/.test(msg)) return `The admin fee must be between 0% and ${MAX_ADMIN_FEE_PERCENT}%.`;
   if (/check constraint/i.test(msg)) return "Something in this form isn’t valid. Check the fields and try again.";

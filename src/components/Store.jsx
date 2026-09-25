@@ -4,16 +4,18 @@ import { fmtMoney, fmtDate, todayISO } from "../lib/format.js";
 import {
   blankProduct, validateProduct, stockSummary, availability, storeStats, adminFee,
   validateSettings, policySections, friendlyStoreError, SIZE_PRESETS, PHOTO_MAX_INPUT_BYTES,
+  groupStatus, orderStatus, nextStep, orderStats, supplierSummary, filterOrders, ordersToCsv, parsePrice,
 } from "../lib/store.js";
 import {
   loadStore, photoUrl, preparePhoto, uploadPhoto, removePhoto, saveProduct,
   deleteProduct, moveProduct, setProductVisible, saveSettings,
+  loadOrders, advanceItems, markSupplierOrdered, recordRefund, resolveAttention,
 } from "../lib/storeApi.js";
 
 // ---------------------------------------------------------------------------
-// Store tab (Club Management). Drop 1: products, sizes, stock, photos,
-// admin fee and store policy. Guardians can't see any of this until the
-// Player Portal shop (Drop 2) is installed and the shop is switched on.
+// Store tab (Club Management): products, sizes, stock, photos, orders,
+// admin fee and store policy. Guardians see products in the Player Portal
+// shop once the shop is switched on in Store settings.
 //
 // This tab loads and saves its own data through lib/storeApi.js rather
 // than through App.jsx, so the store stays self-contained.
@@ -75,6 +77,31 @@ const STORE_CSS = `
 .st-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: ${T.ink}; color: ${T.paper}; padding: 10px 18px; border-radius: 999px; font: 700 13px 'Karla', sans-serif; z-index: 100; }
 tr.st-row { cursor: pointer; }
 tr.st-row:hover td { background: ${T.paperDim}; }
+.st-filters { display: flex; gap: 10px; flex-wrap: wrap; padding: 14px 16px 0; }
+.st-filters .gfc-input, .st-filters .gfc-select { width: auto; min-width: 170px; }
+.st-supplier { background: #f8f6fc; border: 1px solid #d9d3ef; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+.st-supplier-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.st-supplier-head b { color: ${T.indigo}; }
+.st-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-pills span { background: #fff; border: 1px solid #d9d3ef; border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+.st-pills b { font-family: 'JetBrains Mono', monospace; margin-left: 4px; }
+.st-order-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+.st-box { background: #faf8f2; border: 1px solid ${T.line}; border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.6; }
+.st-box h4 { margin: 0 0 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: ${T.inkSoft}; }
+.st-group { border: 1px solid ${T.line}; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+.st-group-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; flex-wrap: wrap; }
+.st-line { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; padding: 3px 0; }
+.st-short { color: ${T.danger}; font-weight: 700; font-size: 11.5px; margin-left: 6px; }
+.st-history { list-style: none; padding: 0; margin: 0; font-size: 12.5px; }
+.st-history li { padding: 6px 0; border-bottom: 1px solid ${T.paperDim}; display: flex; gap: 12px; }
+.st-history li:last-child { border-bottom: 0; }
+.st-history time { color: ${T.inkSoft}; min-width: 128px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
+.st-refund { background: ${T.dangerSoft}; border-radius: 10px; padding: 14px; margin-top: 12px; }
+.st-refund p { margin: 0 0 10px; font-size: 13px; line-height: 1.5; }
+.st-attention { background: ${T.amberSoft}; border: 1px solid #efd9a8; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; font-size: 13px; line-height: 1.5; color: #6e4a07; }
+.st-sub-head { font-size: 12.5px; font-weight: 700; color: ${T.indigo}; margin: 18px 0 8px; }
+.st-flag { display: inline-block; background: ${T.amberSoft}; color: #8a5a06; border-radius: 999px; font-size: 11px; font-weight: 700; padding: 2px 8px; margin-left: 6px; }
+@media (max-width: 640px) { .st-order-grid { grid-template-columns: 1fr; } }
 @media (max-width: 980px) { .st-policy-grid { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .st-radio-row { grid-template-columns: 1fr; } }
 `;
@@ -208,7 +235,7 @@ export function StoreView({ role }) {
       <div className="gfc-topbar">
         <div>
           <div className="gfc-page-title gfc-display">Store</div>
-          <div className="gfc-page-sub">Products, admin fee and store policy for the Player Portal shop</div>
+          <div className="gfc-page-sub">Products, orders, admin fee and store policy for the Player Portal shop</div>
         </div>
         {tab === "products" && !loadError && (
           <button className="gfc-btn gfc-btn-primary" onClick={() => setEditing("new")} disabled={loading}>+ Add product</button>
@@ -217,6 +244,7 @@ export function StoreView({ role }) {
 
       <div className="st-tabs" role="tablist">
         <button className={`st-tab ${tab === "products" ? "on" : ""}`} role="tab" aria-selected={tab === "products"} onClick={() => setTab("products")}>Products</button>
+        <button className={`st-tab ${tab === "orders" ? "on" : ""}`} role="tab" aria-selected={tab === "orders"} onClick={() => setTab("orders")}>Orders</button>
         <button className={`st-tab ${tab === "settings" ? "on" : ""}`} role="tab" aria-selected={tab === "settings"} onClick={() => setTab("settings")}>Store settings</button>
       </div>
 
@@ -288,6 +316,8 @@ export function StoreView({ role }) {
           </div>
           <div className="st-hint" style={{ marginTop: 10 }}>Products appear in the shop in this order. Use the arrows to move them.</div>
         </>
+      ) : tab === "orders" ? (
+        <OrdersPanel products={products} onStockChanged={refresh} showToast={showToast} />
       ) : (
         <SettingsPanel settings={settings} onSaved={(row) => { setSettings(row); showToast("Store settings saved"); }} />
       )}
@@ -708,6 +738,328 @@ function SettingsPanel({ settings, onSaved }) {
             <p>{[form.contactEmail.trim(), form.contactPhone.trim()].filter(Boolean).join(" · ")}</p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ================================= Orders ================================= */
+
+const ORDER_BADGE = {
+  paid: ["gfc-badge gfc-badge-amber", "Paid · to prepare"],
+  prepaid: ["gfc-badge gfc-badge-neutral", "Paid · pre-order", { background: "#ecebf8", color: "#3b2f86" }],
+  supplier: ["gfc-badge gfc-badge-neutral", "Ordered from supplier"],
+  ready: ["gfc-badge gfc-badge-green", "Ready for collection"],
+  collected: ["gfc-badge gfc-badge-neutral", "Collected"],
+  refunded: ["gfc-badge gfc-badge-red", "Refunded"],
+};
+function OrderBadge({ status }) {
+  const b = ORDER_BADGE[status];
+  if (!b) return null;
+  return <span className={b[0]} style={b[2]}>{b[1]}</span>;
+}
+const fmtStamp = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })} ${d.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" })}`;
+};
+const lineLabel = (l) => `${l.quantity} × ${l.name}${l.size ? ` (${l.size})` : ""}`;
+
+function OrdersPanel({ products, onStockChanged, showToast }) {
+  const [orders, setOrders] = useState(null);
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState({ q: "", status: "open", period: "all" });
+  const [openId, setOpenId] = useState(null);
+  const [busy, setBusy] = useState("");
+
+  const reload = useCallback(async () => {
+    try {
+      setOrders(await loadOrders());
+      setError("");
+    } catch (e) {
+      setError(friendlyStoreError(e));
+    }
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  const today = todayISO();
+  const list = useMemo(() => (orders ? filterOrders(orders, filter, today) : []), [orders, filter, today]);
+  const stats = useMemo(() => orderStats(orders || [], today.slice(0, 7)), [orders, today]);
+  const supplier = useMemo(() => supplierSummary(orders || []), [orders]);
+  const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+
+  if (error && !orders) {
+    return (
+      <div className="st-banner err">
+        Couldn’t load orders: {error}{" "}
+        <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={reload}>Try again</button>
+      </div>
+    );
+  }
+  if (!orders) return <div className="gfc-empty">Loading orders…</div>;
+
+  async function orderSupplier(productId, name) {
+    if (!window.confirm(`Mark all paid ${name} pre-orders as ordered from the supplier? Guardians will see “Ordered from supplier”.`)) return;
+    setBusy(productId);
+    try {
+      const n = await markSupplierOrdered(productId);
+      await reload();
+      showToast(`${n} order${n === 1 ? "" : "s"} marked as ordered from supplier`);
+    } catch (e) {
+      setError(friendlyStoreError(e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function downloadCsv() {
+    const blob = new Blob(["\ufeff" + ordersToCsv(list)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `store-orders-${today}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  const open = openId ? orders.find((o) => o.id === openId) : null;
+
+  return (
+    <>
+      {error && <div className="st-banner err">{error}</div>}
+      <div className="gfc-stat-row">
+        <Stat color={T.amber} label="Orders to prepare" value={stats.toPrepare} />
+        <Stat color={T.green} label="Waiting for collection" value={stats.waiting} />
+        <Stat color="#6b5cc4" label="Pre-order items to order" value={stats.preorderItems} />
+        <Stat color={T.indigo} label="Sales this month" value={<span style={{ fontSize: 21 }}>{fmtMoney(stats.sales)}</span>} />
+      </div>
+
+      {stats.attention > 0 && (
+        <div className="st-attention">
+          <b>{stats.attention} order{stats.attention === 1 ? " needs" : "s need"} attention</b>, for example an item that sold out as it was paid for, or a payment that doesn’t match.{" "}
+          <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={() => setFilter((f) => ({ ...f, status: "attention" }))}>Show them</button>
+        </div>
+      )}
+
+      {supplier.map((s) => {
+        const p = productById.get(s.productId);
+        return (
+          <div className="st-supplier" key={s.productId}>
+            <div className="st-supplier-head">
+              <div>
+                <b>{s.name}</b>{" "}
+                <span className="st-muted">
+                  · {p && p.preorderClosesOn ? `pre-orders close ${fmtDate(p.preorderClosesOn)} · ` : ""}{s.total} to order from the supplier
+                </span>
+              </div>
+              <button className="gfc-btn gfc-btn-outline gfc-btn-sm" disabled={busy === s.productId} onClick={() => orderSupplier(s.productId, s.name)}>
+                {busy === s.productId ? "Updating…" : "Mark all as ordered from supplier"}
+              </button>
+            </div>
+            <div className="st-pills">{s.sizes.map((z) => <span key={z.size}>{z.size}<b>× {z.quantity}</b></span>)}</div>
+          </div>
+        );
+      })}
+
+      <div className="gfc-panel">
+        <div className="gfc-panel-head">
+          <div className="gfc-panel-title">Orders ({list.length})</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="gfc-btn gfc-btn-ghost gfc-btn-sm" onClick={reload}>Refresh</button>
+            <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={downloadCsv} disabled={list.length === 0}>Download CSV</button>
+          </div>
+        </div>
+        <div className="st-filters">
+          <input className="gfc-input" style={{ minWidth: 260 }} placeholder="Search order number, name, email or phone" aria-label="Search orders"
+            value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
+          <select className="gfc-select" aria-label="Status" value={filter.status} onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value }))}>
+            <option value="open">Open orders</option>
+            <option value="all">All orders</option>
+            <option value="attention">Needs attention</option>
+            <option value="paid">Paid · to prepare</option>
+            <option value="prepaid">Paid · pre-order</option>
+            <option value="supplier">Ordered from supplier</option>
+            <option value="ready">Ready for collection</option>
+            <option value="collected">Collected</option>
+            <option value="refunded">Refunded</option>
+          </select>
+          <select className="gfc-select" aria-label="Period" value={filter.period} onChange={(e) => setFilter((f) => ({ ...f, period: e.target.value }))}>
+            <option value="all">All time</option>
+            <option value="month">This month</option>
+            <option value="3m">Last 3 months</option>
+          </select>
+        </div>
+        {list.length === 0 ? (
+          <div className="gfc-empty">
+            <div className="gfc-empty-title gfc-display">{orders.length === 0 ? "No orders yet" : "No orders match"}</div>
+            {orders.length === 0 ? "Paid orders from the Player Portal shop appear here." : "Try a different search, status or period."}
+          </div>
+        ) : (
+          <div className="st-scroll" style={{ marginTop: 14 }}>
+            <table className="gfc-table">
+              <thead><tr><th>Order</th><th>Paid</th><th>Guardian</th><th>Items</th><th>Total</th><th>Status</th></tr></thead>
+              <tbody>
+                {list.map((o) => (
+                  <tr key={o.id} className="st-row" tabIndex={0} onClick={() => setOpenId(o.id)} onKeyDown={(e) => { if (e.key === "Enter") setOpenId(o.id); }}>
+                    <td className="gfc-mono" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{o.number}{o.needsAttention && <span className="st-flag">Check</span>}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{fmtDate(o.paidAt)}</td>
+                    <td>{o.guardianName}<div className="st-muted">{o.guardianPhone}</div></td>
+                    <td style={{ fontSize: 12.5 }}>{o.lines.map((l) => <div key={l.id}>{lineLabel(l)}</div>)}</td>
+                    <td className="st-money">{fmtMoney(o.total)}</td>
+                    <td><OrderBadge status={orderStatus(o)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {open && (
+        <OrderModal
+          order={open}
+          onClose={() => setOpenId(null)}
+          onChanged={async (msg, stockChanged) => {
+            await reload();
+            if (stockChanged) await onStockChanged();
+            if (msg) showToast(msg);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function OrderModal({ order, onClose, onChanged }) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [refundOpen, setRefundOpen] = useState(false);
+  const remaining = Math.round((order.total - order.refundedTotal) * 100) / 100;
+  const [refund, setRefund] = useState({ amount: remaining.toFixed(2), reason: "", done: false });
+  const [resolveNote, setResolveNote] = useState("");
+
+  const groups = [
+    ["In-stock items", order.lines.filter((l) => !l.isPreorder), false],
+    ["Pre-order items", order.lines.filter((l) => l.isPreorder), true],
+  ].filter((g) => g[1].length);
+  const refundable = order.lines.some((l) => l.status !== "refunded");
+
+  async function run(key, fn, msg, stockChanged = false) {
+    setBusy(key);
+    setError("");
+    try {
+      await fn();
+      await onChanged(msg, stockChanged);
+      return true;
+    } catch (e) {
+      setError(friendlyStoreError(e));
+      return false;
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function submitRefund() {
+    const amount = parsePrice(refund.amount);
+    if (amount === null || amount <= 0) { setError("Enter the amount you refunded, e.g. 465.75."); return; }
+    if (amount > remaining) { setError(`That’s more than was paid. At most ${fmtMoney(remaining)} can be refunded.`); return; }
+    if (refund.reason.trim().length < 3) { setError("Enter a reason for the refund."); return; }
+    if (!refund.done) { setError("Refund the payment in the Yoco Business Portal first, then tick the box."); return; }
+    run("refund", () => recordRefund(order.id, amount, refund.reason.trim()), "Refund recorded", true)
+      .then((ok) => { if (ok) setRefundOpen(false); });
+  }
+
+  return (
+    <div className="gfc-modal-backdrop" onClick={() => { if (!busy) onClose(); }}>
+      <div className="gfc-modal st-wide" role="dialog" aria-modal="true" aria-label={`Order ${order.number}`} onClick={(e) => e.stopPropagation()}>
+        <div className="gfc-modal-head">
+          <div className="gfc-modal-title gfc-display">Order {order.number}</div>
+          <button className="gfc-modal-close" onClick={onClose} aria-label="Close">×</button>
+        </div>
+
+        {order.needsAttention && (
+          <div className="st-attention">
+            <b>Needs attention.</b> {order.attentionNote}
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <input className="gfc-input" style={{ flex: 1, minWidth: 200 }} placeholder="What you did, e.g. Called guardian, refunded the bottle" value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
+              <button className="gfc-btn gfc-btn-outline gfc-btn-sm" disabled={!!busy} onClick={() => run("resolve", () => resolveAttention(order.id, resolveNote), "Marked as resolved")}>Mark as resolved</button>
+            </div>
+          </div>
+        )}
+
+        <div className="st-order-grid">
+          <div className="st-box"><h4>Guardian</h4>{order.guardianName}<br />{order.guardianPhone}<br />{order.guardianEmail}</div>
+          <div className="st-box">
+            <h4>Payment</h4>
+            Items {fmtMoney(order.subtotal)}{order.adminFee > 0 && <> + admin fee {fmtMoney(order.adminFee)}</>}<br />
+            <b>{fmtMoney(order.total)}</b> paid {fmtDate(order.paidAt)} via Yoco<br />
+            {order.refundedTotal > 0 && <><span style={{ color: T.danger, fontWeight: 700 }}>{fmtMoney(order.refundedTotal)} refunded</span><br /></>}
+            <span className="st-muted">Yoco reference </span><span className="gfc-mono" style={{ fontSize: 11.5 }}>{order.yocoPaymentId}</span>
+          </div>
+        </div>
+
+        {groups.map(([title, lines, pre]) => {
+          const step = nextStep(lines);
+          return (
+            <div className="st-group" key={title}>
+              <div className="st-group-head"><b style={{ fontSize: 13 }}>{groups.length > 1 ? title : "Items"}</b><OrderBadge status={groupStatus(lines)} /></div>
+              {lines.map((l) => (
+                <div className="st-line" key={l.id}>
+                  <span>{lineLabel(l)}{l.stockShort && <span className="st-short">Sold out when paid</span>}</span>
+                  <span className="st-money">{fmtMoney(l.quantity * l.unitPrice)}</span>
+                </div>
+              ))}
+              {step && (
+                <div style={{ marginTop: 10 }}>
+                  <button className="gfc-btn gfc-btn-primary gfc-btn-sm" disabled={!!busy}
+                    onClick={() => run(`adv-${pre}`, () => advanceItems(order.id, pre, step.to), step.label.replace("Mark as ", "Marked as "))}>
+                    {busy === `adv-${pre}` ? "Updating…" : step.label}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <div className="st-sub-head">History</div>
+        <ul className="st-history">
+          {order.events.map((e, i) => (
+            <li key={i}><time>{fmtStamp(e.at)}</time><span>{e.message}{e.by && <span className="st-muted"> · {e.by}</span>}</span></li>
+          ))}
+        </ul>
+
+        {refundOpen && (
+          <div className="st-refund">
+            <p><b>Record a refund.</b> First refund the guardian in the Yoco Business Portal, then record it here. Items that weren’t collected go back into stock.</p>
+            <div className="gfc-row2">
+              <div className="gfc-field">
+                <label className="gfc-label" htmlFor="rf-amount">Amount refunded (R)</label>
+                <input className="gfc-input" id="rf-amount" inputMode="decimal" value={refund.amount} onChange={(e) => setRefund((r) => ({ ...r, amount: e.target.value }))} />
+                <div className="st-hint">Full order: {fmtMoney(remaining)}{order.adminFee > 0 && `, or ${fmtMoney(Math.max(0, remaining - order.adminFee))} without the admin fee`}.</div>
+              </div>
+              <div className="gfc-field">
+                <label className="gfc-label" htmlFor="rf-reason">Reason</label>
+                <input className="gfc-input" id="rf-reason" placeholder="e.g. Wrong size, cancelled within 7 days" value={refund.reason} onChange={(e) => setRefund((r) => ({ ...r, reason: e.target.value }))} />
+              </div>
+            </div>
+            <label className="st-check"><input type="checkbox" checked={refund.done} onChange={(e) => setRefund((r) => ({ ...r, done: e.target.checked }))} />I’ve refunded this in the Yoco Business Portal</label>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="gfc-btn gfc-btn-ghost gfc-btn-sm" onClick={() => { setRefundOpen(false); setError(""); }} disabled={!!busy}>Cancel</button>
+              <button className="gfc-btn gfc-btn-danger gfc-btn-sm" onClick={submitRefund} disabled={!!busy}>{busy === "refund" ? "Recording…" : "Record refund"}</button>
+            </div>
+          </div>
+        )}
+
+        {error && <div className="st-banner err" style={{ marginTop: 12, marginBottom: 0 }}>{error}</div>}
+
+        <div className="gfc-modal-actions">
+          {refundable && !refundOpen && (
+            <button className="gfc-btn gfc-btn-ghost" style={{ marginRight: "auto", color: T.danger }} onClick={() => setRefundOpen(true)}>Record a refund…</button>
+          )}
+          <button className="gfc-btn gfc-btn-outline" onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );
