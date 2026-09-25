@@ -50,6 +50,7 @@ import { FixturesView } from "./components/Fixtures.jsx";
 import { SettingsView, LeagueSourceModal } from "./components/Settings.jsx";
 import { UsersView } from "./components/Users.jsx";
 import { RefereePayView } from "./components/RefereePay.jsx";
+import { StoreView } from "./components/Store.jsx";
 import { LoginView, AcceptInviteView, NoAccessView } from "./components/Auth.jsx";
 
 /* ---------- HELPERS ---------- */
@@ -68,6 +69,7 @@ const CLUB_OPS_NAV = [
   { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
   { id: "fixtures", label: "Fixtures", icon: "📋", roles: ["admin", "treasurer", "coach", "referee"] },
   { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
+  { id: "store", label: "Store", icon: "🛍", roles: ["admin", "treasurer", "chairman"] },
 ];
 
 const ADMIN_NAV = [
@@ -83,7 +85,7 @@ function MainApp({ role, staffId, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
-  const [tab, setTab] = useState(role === "coach" ? "squad" : role === "referee" ? "fixtures" : "dashboard");
+  const [tab, setTab] = useState(role === "coach" ? "squad" : role === "referee" ? "fixtures" : role === "chairman" ? "store" : "dashboard");
   const [adminExpanded, setAdminExpanded] = useState(false);
   const [ageFilter, setAgeFilter] = useState("All");
   const [includeInactive, setIncludeInactive] = useState(false);
@@ -1560,6 +1562,8 @@ function MainApp({ role, staffId, onLogout }) {
             onSyncFixtures={syncFixturesToMatchday}
           />
         )}
+
+        {tab === "store" && <StoreView role={role} />}
 
         {tab === "kit" && (
           <KitView
