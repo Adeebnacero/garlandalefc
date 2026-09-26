@@ -28,7 +28,8 @@ const STORE_CSS = `
 .st-tab:focus-visible, .st-arrow:focus-visible, tr.st-row:focus-visible { outline: 3px solid ${T.gold}; outline-offset: 2px; }
 .st-scroll { overflow-x: auto; }
 .st-thumb { width: 40px; height: 40px; border-radius: 8px; background: ${T.paperDim}; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: 0 0 auto; margin-right: 10px; }
-.st-thumb img { width: 100%; height: 100%; object-fit: cover; }
+/* Photos are fitted, never cropped, so staff see exactly what's uploaded. */
+.st-thumb img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
 .st-thumb svg { width: 60%; height: 60%; }
 .st-prod { display: flex; align-items: center; font-weight: 700; }
 .st-muted { color: ${T.inkSoft}; font-size: 12px; font-weight: 500; }
