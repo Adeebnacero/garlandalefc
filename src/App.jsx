@@ -69,7 +69,7 @@ const CLUB_OPS_NAV = [
   { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
   { id: "fixtures", label: "Fixtures", icon: "📋", roles: ["admin", "treasurer", "coach", "referee"] },
   { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
-  { id: "store", label: "Store", icon: "🛍", roles: ["admin", "treasurer", "chairman"] },
+  { id: "store", label: "Store", icon: "🛍", roles: ["admin", "treasurer"] },
 ];
 
 const ADMIN_NAV = [
@@ -80,12 +80,22 @@ const ADMIN_NAV = [
   { id: "users", label: "Users", icon: "👤", roles: ["admin"] },
 ];
 
-function MainApp({ role, staffId, onLogout }) {
+// A Chairman has exactly the same access as an Admin everywhere in this
+// app (and the database treats them the same - see
+// migrations/2026-09-chairman-and-home-banners.sql). Every access decision
+// below uses `role`, which is "admin" for a Chairman; `accountRole` is only
+// used to show the account's real role.
+function accessRoleFor(accountRole) {
+  return accountRole === "chairman" ? "admin" : accountRole;
+}
+
+function MainApp({ role: accountRole, staffId, onLogout }) {
+  const role = accessRoleFor(accountRole);
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
-  const [tab, setTab] = useState(role === "coach" ? "squad" : role === "referee" ? "fixtures" : role === "chairman" ? "store" : "dashboard");
+  const [tab, setTab] = useState(role === "coach" ? "squad" : role === "referee" ? "fixtures" : "dashboard");
   const [adminExpanded, setAdminExpanded] = useState(false);
   const [ageFilter, setAgeFilter] = useState("All");
   const [includeInactive, setIncludeInactive] = useState(false);
@@ -1463,7 +1473,7 @@ function MainApp({ role, staffId, onLogout }) {
           })()}
         </nav>
         <div className="gfc-sidebar-foot">
-          <div style={{ marginBottom: 8, textTransform: "capitalize" }}>{role} account</div>
+          <div style={{ marginBottom: 8, textTransform: "capitalize" }}>{accountRole} account</div>
           <button
             onClick={onLogout}
             style={{ background: "none", border: "none", color: T.gold, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 8 }}

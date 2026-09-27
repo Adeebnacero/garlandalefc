@@ -43,7 +43,7 @@ export function UsersView({ staffList, onInvite, onRemove, busy, message, staffT
               <option value="treasurer">Treasurer (financial only)</option>
               <option value="coach">Coach (squad/matchday/kit only)</option>
               <option value="referee">Referee (fixtures only)</option>
-              <option value="chairman">Chairman (store only)</option>
+              <option value="chairman">Chairman (full access, same as Admin)</option>
             </select>
           </div>
           <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy}>{busy ? "Sending…" : "Send invite"}</button>
@@ -75,7 +75,7 @@ export function UsersView({ staffList, onInvite, onRemove, busy, message, staffT
                         {" "}
                         <button className="gfc-btn gfc-btn-ghost gfc-btn-sm" onClick={() => setEditingTeamsFor(s)}>Edit</button>
                       </>
-                    ) : s.role === "referee" || s.role === "chairman" ? (
+                    ) : s.role === "referee" ? (
                       <span style={{ color: T.inkSoft }}>N/A</span>
                     ) : (
                       <span style={{ color: T.inkSoft }}>All (not restricted)</span>
