@@ -283,7 +283,10 @@ function NoticeBoardSection({ notices, role, staffId, onAdd, onEdit }) {
                     )}
                   </td>
                   <td><span className="gfc-agepill">{CATEGORY_LABELS[n.category] || n.category}</span></td>
-                  <td><span className="gfc-agepill" style={{ background: T.indigoSoft }}>{n.targetAgeGroup || "ALL"}</span></td>
+                  <td>
+                    <span className="gfc-agepill" style={{ background: T.indigoSoft }}>{n.targetAgeGroup || "ALL"}</span>
+                    {n.showToSupporters && <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 3 }}>+ supporters</div>}
+                  </td>
                   <td>{n.pinned ? "📌 Yes" : "—"}</td>
                   <td style={{ fontSize: 11.5, color: T.inkSoft }}>{n.postedByEmail || "—"}</td>
                   <td style={{ fontSize: 11.5, color: T.inkSoft }}>{n.postedAt ? new Date(n.postedAt).toLocaleDateString("en-ZA") : "—"}</td>
@@ -322,6 +325,7 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
     targetAgeGroup: notice?.targetAgeGroup || (isAdminOrTreasurer ? "ALL" : myTeams[0] || ""),
     locationLink: notice?.locationLink || "",
     locationEmbed: notice?.locationEmbed || "",
+    showToSupporters: !!notice?.showToSupporters,
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -392,6 +396,15 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
               You don't have any teams assigned yet — ask an Admin to assign you one in Users before you can post.
             </div>
           )}
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, margin: "0 0 14px", cursor: "pointer" }}>
+            <input type="checkbox" checked={form.showToSupporters} onChange={(e) => update("showToSupporters", e.target.checked)} style={{ marginTop: 2, accentColor: T.indigo }} />
+            <span>
+              <b>Also show to supporters</b>
+              <span style={{ display: "block", fontSize: 11.5, color: T.inkSoft, marginTop: 2 }}>
+                Supporters (fans without a player) only see notices with this ticked. Leave it off for team notices like training changes.
+              </span>
+            </span>
+          </label>
           <LocationFields link={form.locationLink} embed={form.locationEmbed} onChange={update} />
           <div className="gfc-field">
             <label className="gfc-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>

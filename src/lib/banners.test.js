@@ -55,6 +55,10 @@ describe("validateBanner", () => {
     const other = validateBanner(base({ buttonKind: "fixtures", showProductStrip: true, markShopNew: true }), admin).row;
     expect([other.show_product_strip, other.mark_shop_new]).toEqual([false, false]);
   });
+  it("carries the supporters option", () => {
+    expect(validateBanner(base({ showToSupporters: true }), admin).row.show_to_supporters).toBe(true);
+    expect(validateBanner(base({}), admin).row.show_to_supporters).toBe(false);
+  });
   it("limits coaches to their own teams", () => {
     expect(validateBanner(base({ targetAgeGroup: "ALL" }), coach).errors.target).toBeTruthy();
     expect(validateBanner(base({ targetAgeGroup: "U14" }), coach).errors.target).toBeTruthy();

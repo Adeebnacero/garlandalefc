@@ -51,6 +51,7 @@ import { SettingsView, LeagueSourceModal } from "./components/Settings.jsx";
 import { UsersView } from "./components/Users.jsx";
 import { RefereePayView } from "./components/RefereePay.jsx";
 import { StoreView } from "./components/Store.jsx";
+import { SupportersView } from "./components/Supporters.jsx";
 import { LoginView, AcceptInviteView, NoAccessView } from "./components/Auth.jsx";
 
 /* ---------- HELPERS ---------- */
@@ -78,6 +79,7 @@ const ADMIN_NAV = [
   { id: "backups", label: "Backups", icon: "⟳", roles: ["admin"] },
   { id: "settings", label: "Settings", icon: "⚙", roles: ["admin", "treasurer"] },
   { id: "users", label: "Users", icon: "👤", roles: ["admin"] },
+  { id: "supporters", label: "Supporters", icon: "📣", roles: ["admin", "treasurer"] },
 ];
 
 // A Chairman has exactly the same access as an Admin everywhere in this
@@ -1574,6 +1576,7 @@ function MainApp({ role: accountRole, staffId, onLogout }) {
         )}
 
         {tab === "store" && <StoreView role={role} />}
+        {tab === "supporters" && <SupportersView clubSettings={clubSettings} />}
 
         {tab === "kit" && (
           <KitView

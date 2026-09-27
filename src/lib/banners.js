@@ -71,6 +71,7 @@ export function fromDbBanner(row) {
     startsOn: row.starts_on,
     endsOn: row.ends_on,
     targetAgeGroup: row.target_age_group && row.target_age_group !== "ALL" ? row.target_age_group : "ALL",
+    showToSupporters: !!row.show_to_supporters,
     postedBy: row.posted_by || null,
     postedByEmail: row.posted_by_email || "",
   };
@@ -81,7 +82,7 @@ export function blankBanner(today, defaultTarget = "ALL") {
   return {
     id: null, title: "", message: "", buttonKind: "none", buttonLabel: "", linkUrl: "", locationLink: "",
     photoPath: "", showProductStrip: false, markShopNew: false,
-    startsOn: today, endsOn: addDays(today, 13), targetAgeGroup: defaultTarget,
+    startsOn: today, endsOn: addDays(today, 13), targetAgeGroup: defaultTarget, showToSupporters: false,
   };
 }
 
@@ -159,6 +160,7 @@ export function validateBanner(draft, { canTargetAll, allowedGroups = [] }) {
       starts_on: starts,
       ends_on: ends,
       target_age_group: target === "ALL" ? "ALL" : target,
+      show_to_supporters: !!draft.showToSupporters,
     } : null,
   };
 }

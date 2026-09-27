@@ -335,6 +335,7 @@ export function fromDbNotice(row) {
     postedAt: row.posted_at,
     locationLink: row.location_link || "",
     locationEmbed: row.location_embed || "",
+    showToSupporters: !!row.show_to_supporters,
   };
 }
 
@@ -356,5 +357,6 @@ export function toDbNotice(form, staffId) {
     target_age_group: !form.targetAgeGroup || form.targetAgeGroup === "ALL" ? null : form.targetAgeGroup,
     location_link: form.locationLink || null,
     location_embed: form.locationEmbed || null,
+    show_to_supporters: !!form.showToSupporters,
   };
 }

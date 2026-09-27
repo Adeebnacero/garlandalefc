@@ -120,7 +120,7 @@ export function HomeBannersSection({ role, staffId, staffTeams, ageGroups }) {
                       <td><span className={STATUS_BADGE[st][0]}>{STATUS_BADGE[st][1]}</span>{st === "live" && <div className="hb-hint">{daysLeft(b, today)} day{daysLeft(b, today) === 1 ? "" : "s"} left</div>}</td>
                       <td style={{ fontWeight: 600 }}>{b.title}{!editable && <div className="hb-hint">View only</div>}</td>
                       <td style={{ whiteSpace: "nowrap", fontSize: 12.5 }}>{fmtDate(b.startsOn)} – {fmtDate(b.endsOn)}</td>
-                      <td>{b.targetAgeGroup === "ALL" ? "Everyone" : b.targetAgeGroup}</td>
+                      <td>{b.targetAgeGroup === "ALL" ? "Everyone" : b.targetAgeGroup}{b.showToSupporters && <div className="hb-hint">+ supporters</div>}</td>
                       <td style={{ fontSize: 12.5 }}>{buttonText(b) || "—"}{b.markShopNew && <div className="hb-hint">+ “New” on Shop tab</div>}</td>
                       <td style={{ fontSize: 12 }}>{b.postedByEmail}</td>
                     </tr>
@@ -303,6 +303,10 @@ function BannerModal({ banner, readOnly, canTargetAll, myTeams, ageGroups, staff
               </select>
               {errors.target && <div className="hb-err">{errors.target}</div>}
             </div>
+            <label className="hb-check">
+              <input type="checkbox" checked={!!form.showToSupporters} onChange={(e) => update("showToSupporters", e.target.checked)} />
+              <span><b>Also show to supporters</b> <span className="hb-hint">(fans without a player; they only see banners with this ticked)</span></span>
+            </label>
           </fieldset>
 
           <div>
