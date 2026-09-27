@@ -52,8 +52,8 @@ Deno.serve(async (req) => {
       .eq("user_id", callerData.user.id)
       .single();
 
-    if (staffErr || !callerStaff || callerStaff.role !== "admin") {
-      return new Response(JSON.stringify({ error: "Only an Admin can invite new staff." }), {
+    if (staffErr || !callerStaff || !["admin", "chairman"].includes(callerStaff.role)) {
+      return new Response(JSON.stringify({ error: "Only an Admin or Chairman can invite new staff." }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
