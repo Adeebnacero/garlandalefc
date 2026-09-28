@@ -30,7 +30,7 @@ describe("validateBanner", () => {
   it("accepts a simple banner for everyone", () => {
     const r = validateBanner(base({ message: " Saturday 14:00 " }), admin);
     expect(r.ok).toBe(true);
-    expect(r.row).toMatchObject({ title: "Prize-giving", message: "Saturday 14:00", button_kind: "none", target_age_group: "ALL", link_url: null });
+    expect(r.row).toMatchObject({ title: "Prize-giving", message: "Saturday 14:00", button_kind: "none", target_age_group: "ALL", target_age_groups: [], link_url: null });
   });
   it("needs a heading and sensible dates", () => {
     expect(validateBanner(base({ title: " " }), admin).errors.title).toBeTruthy();
@@ -60,9 +60,15 @@ describe("validateBanner", () => {
     expect(validateBanner(base({}), admin).row.show_to_supporters).toBe(false);
   });
   it("limits coaches to their own teams", () => {
-    expect(validateBanner(base({ targetAgeGroup: "ALL" }), coach).errors.target).toBeTruthy();
-    expect(validateBanner(base({ targetAgeGroup: "U14" }), coach).errors.target).toBeTruthy();
-    expect(validateBanner(base({ targetAgeGroup: "U12" }), coach).ok).toBe(true);
+    expect(validateBanner(base({ targetAgeGroups: [] }), coach).errors.target).toBeTruthy();
+    expect(validateBanner(base({ targetAgeGroups: ["U14"] }), coach).errors.target).toBeTruthy();
+    expect(validateBanner(base({ targetAgeGroups: ["U12", "U14"] }), coach).errors.target).toBeTruthy();
+    expect(validateBanner(base({ targetAgeGroups: ["U12"] }), coach).ok).toBe(true);
+  });
+  it("takes several age groups", () => {
+    const r = validateBanner(base({ targetAgeGroups: ["U9", "U7", "U8"] }), admin).row;
+    expect(r.target_age_groups).toEqual(["U7", "U8", "U9"]);
+    expect(r.target_age_group).toBe("U7");
   });
 });
 
@@ -75,6 +81,6 @@ describe("display helpers", () => {
   });
   it("maps rows", () => {
     const b = fromDbBanner({ id: "x", title: "T", button_kind: "shop", starts_on: "2026-09-27", ends_on: "2026-10-10", target_age_group: null });
-    expect(b.targetAgeGroup).toBe("ALL");
+    expect(b.targetAgeGroups).toEqual([]);
   });
 });

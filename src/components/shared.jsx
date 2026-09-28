@@ -133,3 +133,47 @@ export function LocationFields({ link, embed, onChange }) {
     </div>
   );
 }
+
+/* ---------- AGE GROUP PICKER (notices and Home banners) ---------- */
+
+// Tick one or more age groups, or "Everyone" (an empty list). Choosing
+// Everyone clears the individual ticks and vice versa, so it's always
+// clear which applies. For coaches, `allowEveryone` is false and `options`
+// holds only their own teams.
+export function AgeGroupPicker({ value, onChange, options, allowEveryone, label = "Who sees it", id = "agp" }) {
+  const selected = new Set(value || []);
+  const everyone = allowEveryone && selected.size === 0;
+  const toggle = (g) => {
+    const next = new Set(selected);
+    if (next.has(g)) next.delete(g); else next.add(g);
+    onChange(options.filter((o) => next.has(o)));
+  };
+  const chip = (on) => ({
+    display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, cursor: "pointer",
+    border: `1.5px solid ${on ? T.indigo : T.line}`, background: on ? T.indigo : "#fff", color: on ? "#fff" : T.ink,
+    fontSize: 12.5, fontWeight: 700,
+  });
+  return (
+    <div className="gfc-field">
+      <style>{`.agp-chip { position: relative; user-select: none; } .agp-chip:focus-within { outline: 3px solid ${T.gold}; outline-offset: 2px; }`}</style>
+      <div className="gfc-label" id={`${id}-label`}>{label}</div>
+      <div role="group" aria-labelledby={`${id}-label`} style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {allowEveryone && (
+          <label className="agp-chip" style={chip(everyone)}>
+            <input type="checkbox" checked={everyone} onChange={() => onChange([])} style={{ position: "absolute", opacity: 0, width: 1, height: 1 }} />
+            Everyone
+          </label>
+        )}
+        {options.map((g) => (
+          <label key={g} className="agp-chip" style={chip(selected.has(g))}>
+            <input type="checkbox" checked={selected.has(g)} onChange={() => toggle(g)} style={{ position: "absolute", opacity: 0, width: 1, height: 1 }} />
+            {g}
+          </label>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: T.inkSoft, marginTop: 5 }}>
+        {everyone ? "Everyone: all players and guardians." : selected.size ? `Only ${[...options.filter((o) => selected.has(o))].join(", ")}.` : "Tick at least one age group."}
+      </div>
+    </div>
+  );
+}

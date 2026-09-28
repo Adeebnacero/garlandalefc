@@ -4,12 +4,13 @@
 //
 // A banner shows at the top of the Player Portal's Home screen between its
 // start and end dates (inclusive, South African dates), to everyone or to
-// one age group. Only one banner shows at a time: the newest one currently
+// one or more age groups. Only one banner shows at a time: the newest one currently
 // running for that guardian's child. The database enforces the same limits
 // (see migrations/2026-09-chairman-and-home-banners.sql).
 // ---------------------------------------------------------------------------
 
 import { parseMapsLink } from "./mapLinks.js";
+import { groupsFromRow, audienceColumns, cleanGroups } from "./audience.js";
 
 export const MAX_TITLE = 60;
 export const MAX_MESSAGE = 200;
@@ -70,7 +71,7 @@ export function fromDbBanner(row) {
     markShopNew: !!row.mark_shop_new,
     startsOn: row.starts_on,
     endsOn: row.ends_on,
-    targetAgeGroup: row.target_age_group && row.target_age_group !== "ALL" ? row.target_age_group : "ALL",
+    targetAgeGroups: groupsFromRow(row), // [] = everyone
     showToSupporters: !!row.show_to_supporters,
     postedBy: row.posted_by || null,
     postedByEmail: row.posted_by_email || "",
@@ -78,11 +79,11 @@ export function fromDbBanner(row) {
 }
 
 /** A new banner running for two weeks from today. */
-export function blankBanner(today, defaultTarget = "ALL") {
+export function blankBanner(today, defaultTargets = []) {
   return {
     id: null, title: "", message: "", buttonKind: "none", buttonLabel: "", linkUrl: "", locationLink: "",
     photoPath: "", showProductStrip: false, markShopNew: false,
-    startsOn: today, endsOn: addDays(today, 13), targetAgeGroup: defaultTarget, showToSupporters: false,
+    startsOn: today, endsOn: addDays(today, 13), targetAgeGroups: defaultTargets, showToSupporters: false,
   };
 }
 
@@ -139,9 +140,11 @@ export function validateBanner(draft, { canTargetAll, allowedGroups = [] }) {
     else if (ends > addDays(starts, MAX_DAYS - 1)) errors.ends = `A banner can run for at most ${MAX_DAYS} days.`;
   }
 
-  const target = draft.targetAgeGroup || "ALL";
-  if (target === "ALL" && !canTargetAll) errors.target = "Choose one of your teams.";
-  if (target !== "ALL" && !canTargetAll && !allowedGroups.includes(target)) errors.target = "You can only post banners for your own teams.";
+  const groups = cleanGroups(draft.targetAgeGroups || []);
+  if (!canTargetAll) {
+    if (groups.length === 0) errors.target = "Tick at least one of your teams.";
+    else if (groups.some((g) => !allowedGroups.includes(g))) errors.target = "You can only post banners for your own teams.";
+  }
 
   const isShop = kind === "shop";
   const ok = Object.keys(errors).length === 0;
@@ -159,7 +162,7 @@ export function validateBanner(draft, { canTargetAll, allowedGroups = [] }) {
       mark_shop_new: isShop && !!draft.markShopNew,
       starts_on: starts,
       ends_on: ends,
-      target_age_group: target === "ALL" ? "ALL" : target,
+      ...audienceColumns(groups, "ALL"),
       show_to_supporters: !!draft.showToSupporters,
     } : null,
   };

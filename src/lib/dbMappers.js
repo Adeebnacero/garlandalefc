@@ -1,3 +1,4 @@
+import { groupsFromRow, audienceColumns } from "./audience.js";
 // ---------------------------------------------------------------------------
 // Mapping functions between Supabase's snake_case Postgres rows and the
 // camelCase shape the rest of the app works in. Pure functions, no side
@@ -331,7 +332,7 @@ export function fromDbNotice(row) {
     pinned: !!row.pinned,
     postedByEmail: row.posted_by_email || "",
     postedBy: row.posted_by || "",
-    targetAgeGroup: row.target_age_group || "ALL",
+    targetAgeGroups: groupsFromRow(row), // [] = everyone
     postedAt: row.posted_at,
     locationLink: row.location_link || "",
     locationEmbed: row.location_embed || "",
@@ -354,7 +355,7 @@ export function toDbNotice(form, staffId) {
     category: form.category === "training" ? "training" : "announcement",
     pinned: !!form.pinned,
     posted_by: staffId,
-    target_age_group: !form.targetAgeGroup || form.targetAgeGroup === "ALL" ? null : form.targetAgeGroup,
+    ...audienceColumns(form.targetAgeGroups || [], null),
     location_link: form.locationLink || null,
     location_embed: form.locationEmbed || null,
     show_to_supporters: !!form.showToSupporters,

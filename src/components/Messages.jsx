@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { T } from "../theme.js";
 import { waLink, smsLink, fillTemplate, TEMPLATES } from "../lib/messaging.js";
-import { Badge, LocationFields } from "./shared.jsx";
+import { Badge, LocationFields, AgeGroupPicker } from "./shared.jsx";
+import { audienceLabel, sortGroups } from "../lib/audience.js";
 import { checkLocationFields } from "../lib/mapLinks.js";
 import { HomeBannersSection } from "./HomeBanners.jsx";
 
@@ -284,7 +285,7 @@ function NoticeBoardSection({ notices, role, staffId, onAdd, onEdit }) {
                   </td>
                   <td><span className="gfc-agepill">{CATEGORY_LABELS[n.category] || n.category}</span></td>
                   <td>
-                    <span className="gfc-agepill" style={{ background: T.indigoSoft }}>{n.targetAgeGroup || "ALL"}</span>
+                    <span className="gfc-agepill" style={{ background: T.indigoSoft }}>{audienceLabel(n.targetAgeGroups)}</span>
                     {n.showToSupporters && <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 3 }}>+ supporters</div>}
                   </td>
                   <td>{n.pinned ? "📌 Yes" : "—"}</td>
@@ -322,7 +323,8 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
     body: notice?.body || "",
     category: notice?.category || "announcement",
     pinned: notice?.pinned || false,
-    targetAgeGroup: notice?.targetAgeGroup || (isAdminOrTreasurer ? "ALL" : myTeams[0] || ""),
+    // [] = everyone. Coaches start with their only team ticked, if they have one.
+    targetAgeGroups: notice ? notice.targetAgeGroups || [] : (isAdminOrTreasurer ? [] : myTeams.length === 1 ? [myTeams[0]] : []),
     locationLink: notice?.locationLink || "",
     locationEmbed: notice?.locationEmbed || "",
     showToSupporters: !!notice?.showToSupporters,
@@ -336,7 +338,11 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.title.trim() || !form.body.trim() || !form.targetAgeGroup) return;
+    if (!form.title.trim() || !form.body.trim()) return;
+    if (!isAdminOrTreasurer && form.targetAgeGroups.length === 0) {
+      setError("Tick at least one of your teams.");
+      return;
+    }
     const loc = checkLocationFields(form);
     if (!loc.ok) {
       setError(loc.errors.link || loc.errors.embed);
@@ -383,14 +389,14 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
                 <option value="training">Training</option>
               </select>
             </div>
-            <div className="gfc-field">
-              <label className="gfc-label">Target</label>
-              <select className="gfc-select" value={form.targetAgeGroup} onChange={(e) => update("targetAgeGroup", e.target.value)} disabled={targetOptions.length === 0}>
-                {isAdminOrTreasurer && <option value="ALL">All players</option>}
-                {targetOptions.map((g) => <option key={g} value={g}>{g}</option>)}
-              </select>
-            </div>
           </div>
+          <AgeGroupPicker
+            id="notice-target"
+            value={form.targetAgeGroups}
+            onChange={(v) => update("targetAgeGroups", v)}
+            options={sortGroups(targetOptions)}
+            allowEveryone={isAdminOrTreasurer}
+          />
           {!isAdminOrTreasurer && targetOptions.length === 0 && (
             <div style={{ fontSize: 11.5, color: T.danger, fontWeight: 600, marginBottom: 10 }}>
               You don't have any teams assigned yet — ask an Admin to assign you one in Users before you can post.
@@ -423,7 +429,7 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
               </button>
             )}
             <button type="button" className="gfc-btn gfc-btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy || !form.targetAgeGroup}>{busy ? "Saving…" : "Save"}</button>
+            <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy || (!isAdminOrTreasurer && form.targetAgeGroups.length === 0)}>{busy ? "Saving…" : "Save"}</button>
           </div>
         </form>
       </div>

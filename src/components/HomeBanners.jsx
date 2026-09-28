@@ -8,6 +8,8 @@ import {
 import { loadBanners, saveBanner, deleteBanner, bannerPhotoUrl, uploadBannerPhoto, removeBannerPhoto } from "../lib/bannersApi.js";
 import { preparePhoto } from "../lib/storeApi.js";
 import { PHOTO_MAX_INPUT_BYTES } from "../lib/store.js";
+import { AgeGroupPicker } from "./shared.jsx";
+import { audienceLabel, sortGroups } from "../lib/audience.js";
 
 // ---------------------------------------------------------------------------
 // Messages -> Home banners. One banner at a time shows at the top of the
@@ -120,7 +122,7 @@ export function HomeBannersSection({ role, staffId, staffTeams, ageGroups }) {
                       <td><span className={STATUS_BADGE[st][0]}>{STATUS_BADGE[st][1]}</span>{st === "live" && <div className="hb-hint">{daysLeft(b, today)} day{daysLeft(b, today) === 1 ? "" : "s"} left</div>}</td>
                       <td style={{ fontWeight: 600 }}>{b.title}{!editable && <div className="hb-hint">View only</div>}</td>
                       <td style={{ whiteSpace: "nowrap", fontSize: 12.5 }}>{fmtDate(b.startsOn)} – {fmtDate(b.endsOn)}</td>
-                      <td>{b.targetAgeGroup === "ALL" ? "Everyone" : b.targetAgeGroup}{b.showToSupporters && <div className="hb-hint">+ supporters</div>}</td>
+                      <td>{audienceLabel(b.targetAgeGroups)}{b.showToSupporters && <div className="hb-hint">+ supporters</div>}</td>
                       <td style={{ fontSize: 12.5 }}>{buttonText(b) || "—"}{b.markShopNew && <div className="hb-hint">+ “New” on Shop tab</div>}</td>
                       <td style={{ fontSize: 12 }}>{b.postedByEmail}</td>
                     </tr>
@@ -155,7 +157,7 @@ export function HomeBannersSection({ role, staffId, staffTeams, ageGroups }) {
 }
 
 function BannerModal({ banner, readOnly, canTargetAll, myTeams, ageGroups, staffId, today, onClose, onDone }) {
-  const initial = useMemo(() => banner ? { ...banner } : blankBanner(today, canTargetAll ? "ALL" : myTeams[0] || ""), [banner, today, canTargetAll, myTeams]);
+  const initial = useMemo(() => banner ? { ...banner } : blankBanner(today, canTargetAll ? [] : myTeams.length === 1 ? [myTeams[0]] : []), [banner, today, canTargetAll, myTeams]);
   const [form, setForm] = useState(initial);
   const [errors, setErrors] = useState({});
   const [saveError, setSaveError] = useState("");
@@ -295,14 +297,14 @@ function BannerModal({ banner, readOnly, canTargetAll, myTeams, ageGroups, staff
                 {errors.ends ? <div className="hb-err">{errors.ends}</div> : <div className="hb-hint">Up to 91 days. It disappears at midnight after this date.</div>}
               </div>
             </div>
-            <div className="gfc-field">
-              <label className="gfc-label" htmlFor="hb-target">Who sees it</label>
-              <select className="gfc-select" id="hb-target" value={form.targetAgeGroup} onChange={(e) => update("targetAgeGroup", e.target.value)}>
-                {canTargetAll && <option value="ALL">Everyone</option>}
-                {targetOptions.map((g) => <option key={g} value={g}>{g}</option>)}
-              </select>
-              {errors.target && <div className="hb-err">{errors.target}</div>}
-            </div>
+            <AgeGroupPicker
+              id="hb-target"
+              value={form.targetAgeGroups || []}
+              onChange={(v) => { setForm((f) => ({ ...f, targetAgeGroups: v })); setErrors((e) => ({ ...e, target: "" })); }}
+              options={sortGroups(targetOptions)}
+              allowEveryone={canTargetAll}
+            />
+            {errors.target && <div className="hb-err" style={{ marginTop: -8, marginBottom: 10 }}>{errors.target}</div>}
             <label className="hb-check">
               <input type="checkbox" checked={!!form.showToSupporters} onChange={(e) => update("showToSupporters", e.target.checked)} />
               <span><b>Also show to supporters</b> <span className="hb-hint">(fans without a player; they only see banners with this ticked)</span></span>
