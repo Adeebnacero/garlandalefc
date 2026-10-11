@@ -47,6 +47,7 @@ import { FinanceView, FinanceEntryModal } from "./components/Finance.jsx";
 import { BackupsView } from "./components/Backups.jsx";
 import { FixturesPostView } from "./components/FixturesPost.jsx";
 import { FixturesView } from "./components/Fixtures.jsx";
+import { CalendarView } from "./components/Calendar.jsx";
 import { SettingsView, LeagueSourceModal } from "./components/Settings.jsx";
 import { UsersView } from "./components/Users.jsx";
 import { RefereePayView } from "./components/RefereePay.jsx";
@@ -69,6 +70,7 @@ const CLUB_OPS_NAV = [
   { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
   { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
   { id: "fixtures", label: "Fixtures", icon: "📋", roles: ["admin", "treasurer", "coach", "referee"] },
+  { id: "calendar", label: "Calendar", icon: "📅", roles: ["admin", "treasurer", "coach", "referee"] },
   { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
   { id: "store", label: "Store", icon: "🛍", roles: ["admin", "treasurer"] },
 ];
@@ -1628,6 +1630,16 @@ function MainApp({ role: accountRole, staffId, onLogout }) {
             onSaveDivisionLabel={saveDivisionLabel}
             onSaveFixture={saveFixture}
             onDeleteFixture={deleteFixture}
+          />
+        )}
+
+        {tab === "calendar" && (
+          <CalendarView
+            role={role}
+            staffId={staffId}
+            fixtures={fixtures}
+            matches={matches}
+            onOpenTab={setTab}
           />
         )}
 
