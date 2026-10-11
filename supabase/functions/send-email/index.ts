@@ -14,11 +14,27 @@
 //   supabase functions deploy send-email
 
 import { SMTPClient } from "https://deno.land/x/denomailer/mod.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Returns an error message unless the caller is logged in as a staff member.
+async function requireStaff(req: Request): Promise<string | null> {
+  const token = (req.headers.get("Authorization") || "").replace("Bearer ", "");
+  if (!token) return "Not authenticated.";
+  const url = Deno.env.get("SUPABASE_URL")!;
+  const caller = createClient(url, Deno.env.get("SUPABASE_ANON_KEY")!, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  const { data: userData, error } = await caller.auth.getUser();
+  if (error || !userData?.user) return "Not authenticated.";
+  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const { data: staffRow } = await admin.from("staff").select("id").eq("user_id", userData.user.id).maybeSingle();
+  return staffRow ? null : "Only club staff can send email.";
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -26,6 +42,16 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // Staff only. The app's public key is enough to reach this function, so
+    // without this check anyone could send email from the club's account.
+    const staffErr = await requireStaff(req);
+    if (staffErr) {
+      return new Response(JSON.stringify({ error: staffErr }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { to, subject, html, fromName, replyTo, pdfBase64, pdfFilename } = await req.json();
 
     if (!to || !subject) {

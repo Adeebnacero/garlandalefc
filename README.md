@@ -209,6 +209,18 @@ Once it works locally, you can deploy it for free on **Vercel** or
   automatically as you issue and return items.
 - **Messages** — WhatsApp/SMS link generation, unchanged from before.
 
+## Club calendar (October 2026)
+
+A **Calendar** tab (after Fixtures) shows club events and fixtures in a week, month or year view. Admin, Chairman and Treasurer can add, edit and delete events and manage the categories; coaches and referees can view it. Everything on it also appears in the Player Portal's Club calendar, for every guardian and approved supporter.
+
+**Setting it up:** run `migrations/2026-10-club-calendar.sql` in the Supabase SQL Editor (safe to run more than once), then deploy the Player Portal's `get-club-calendar` Edge Function.
+
+- **Fixtures** come from the Fixtures tab, plus Matchday entries that weren't created from a fixture (friendlies). They're read-only here; change them in Fixtures or Matchday.
+- **Repeating events** (every week, every 2 weeks or every month, up to an Until date) are saved as one row per date, so each date can still be edited or deleted on its own, or together with every later date.
+- **Categories** can be renamed, recoloured, added and deleted. Deleting one moves its events to Other. Fixture and Other are built in and can't be deleted.
+- **Notice Board:** adding, changing or deleting an event can also post a notice to everyone, which shows the unread badge in the Player Portal.
+- **Not yet in backups:** the two calendar tables (`calendar_categories`, `calendar_events`) aren't included in Backups yet.
+
 ## A note on the team sheet
 
 The printable sheet opens in a new browser tab/window and calls the browser's

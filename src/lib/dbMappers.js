@@ -1,3 +1,4 @@
+import { groupsFromRow, audienceColumns } from "./audience.js";
 // ---------------------------------------------------------------------------
 // Mapping functions between Supabase's snake_case Postgres rows and the
 // camelCase shape the rest of the app works in. Pure functions, no side
@@ -24,7 +25,12 @@ export function fromDbPlayer(row) {
     squadNumber: row.squad_number === null || row.squad_number === undefined ? "" : row.squad_number,
     tierId: row.tier_id || "",
     active: row.active === false ? false : true,
-    hasAppAccount: !!row.user_id,
+    // Number of Player Portal logins linked to this player (guardians, or
+    // the player themselves). Comes from the guardian_players join table;
+    // falls back to the legacy players.user_id column for rows loaded
+    // without that embed.
+    appAccountCount: Array.isArray(row.guardian_players) ? row.guardian_players.length : (row.user_id ? 1 : 0),
+    hasAppAccount: Array.isArray(row.guardian_players) ? row.guardian_players.length > 0 : !!row.user_id,
     statusLog: (row.player_status_log || []).map((s) => ({ id: s.id, status: s.status, changedAt: s.changed_at })),
     payments: (row.payments || [])
       .map((p) => ({ id: p.id, amount: Number(p.amount), date: p.date, method: p.method }))
@@ -102,6 +108,8 @@ export function fromDbMatch(row) {
     physioName: row.physio_name || "",
     physioRegNo: row.physio_reg_no || "",
     comments: row.comments || "",
+    locationLink: row.location_link || "",
+    locationEmbed: row.location_embed || "",
   };
 }
 
@@ -136,6 +144,8 @@ export function toDbMatch(form) {
     physio_name: form.physioName || "",
     physio_reg_no: form.physioRegNo || "",
     comments: form.comments || "",
+    location_link: form.locationLink || null,
+    location_embed: form.locationEmbed || null,
   };
 }
 
@@ -273,9 +283,15 @@ export function fromDbFixture(row) {
     venue: row.venue || "",
     homeAway: row.home_away || "H",
     refereeId: row.referee_id || "",
+    locationLink: row.location_link || "",
+    locationEmbed: row.location_embed || "",
   };
 }
 
+// Used by the spreadsheet import. Deliberately leaves out location_link /
+// location_embed, so re-importing the league schedule never wipes a
+// location someone pasted in by hand (the upsert only sets the columns it
+// is given). Single-fixture edits save those via saveFixture() in App.jsx.
 export function toDbFixture(f) {
   return {
     division_key: f.divisionKey || "",
@@ -316,8 +332,11 @@ export function fromDbNotice(row) {
     pinned: !!row.pinned,
     postedByEmail: row.posted_by_email || "",
     postedBy: row.posted_by || "",
-    targetAgeGroup: row.target_age_group || "ALL",
+    targetAgeGroups: groupsFromRow(row), // [] = everyone
     postedAt: row.posted_at,
+    locationLink: row.location_link || "",
+    locationEmbed: row.location_embed || "",
+    showToSupporters: !!row.show_to_supporters,
   };
 }
 
@@ -336,6 +355,9 @@ export function toDbNotice(form, staffId) {
     category: form.category === "training" ? "training" : "announcement",
     pinned: !!form.pinned,
     posted_by: staffId,
-    target_age_group: !form.targetAgeGroup || form.targetAgeGroup === "ALL" ? null : form.targetAgeGroup,
+    ...audienceColumns(form.targetAgeGroups || [], null),
+    location_link: form.locationLink || null,
+    location_embed: form.locationEmbed || null,
+    show_to_supporters: !!form.showToSupporters,
   };
 }

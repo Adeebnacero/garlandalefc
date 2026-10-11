@@ -1,7 +1,10 @@
 import React, { useState, useMemo } from "react";
 import { T } from "../theme.js";
 import { waLink, smsLink, fillTemplate, TEMPLATES } from "../lib/messaging.js";
-import { Badge } from "./shared.jsx";
+import { Badge, LocationFields, AgeGroupPicker } from "./shared.jsx";
+import { audienceLabel, sortGroups } from "../lib/audience.js";
+import { checkLocationFields } from "../lib/mapLinks.js";
+import { HomeBannersSection } from "./HomeBanners.jsx";
 
 const CATEGORY_LABELS = { announcement: "Announcement", training: "Training", birthday: "🎂 Birthday" };
 
@@ -10,7 +13,7 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
   // payment balances/compliance status, which the app deliberately never
   // shows a coach (see role_permissions/finance tables for the same rule).
   const canSeePlayerMessages = role !== "coach";
-  const [subTab, setSubTab] = useState(canSeePlayerMessages ? "messages" : "notices"); // "messages" | "notices"
+  const [subTab, setSubTab] = useState(canSeePlayerMessages ? "messages" : "notices"); // "messages" | "notices" | "banners"
   const [msgAgeFilter, setMsgAgeFilter] = useState("All");
   const [msgStatusFilter, setMsgStatusFilter] = useState("All");
 
@@ -51,31 +54,33 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
         <div>
           <div className="gfc-page-title gfc-display">Messages</div>
           <div className="gfc-page-sub">
-            {subTab === "messages" ? "Trigger WhatsApp or SMS messages to players / guardians" : "Post announcements and training notices to the player app"}
+            {subTab === "messages" ? "Trigger WhatsApp or SMS messages to players / guardians" : subTab === "banners" ? "Highlight an event or the shop at the top of the Player Portal's Home screen" : "Post announcements and training notices to the player app"}
           </div>
         </div>
       </div>
 
-      {canSeePlayerMessages && (
-        <div style={{ display: "flex", gap: 4, marginBottom: 18 }}>
+      <div style={{ display: "flex", gap: 4, marginBottom: 18, flexWrap: "wrap" }} role="tablist">
+        {[
+          ...(canSeePlayerMessages ? [["messages", "Player Messages"]] : []),
+          ["notices", "Notice Board"],
+          ["banners", "Home banners"],
+        ].map(([id, label]) => (
           <button
+            key={id}
+            role="tab"
+            aria-selected={subTab === id}
             className="gfc-btn gfc-btn-sm"
-            style={{ background: subTab === "messages" ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === "messages" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
-            onClick={() => setSubTab("messages")}
+            style={{ background: subTab === id ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
+            onClick={() => setSubTab(id)}
           >
-            Player Messages
+            {label}
           </button>
-          <button
-            className="gfc-btn gfc-btn-sm"
-            style={{ background: subTab === "notices" ? "#fff" : "transparent", color: T.ink, boxShadow: subTab === "notices" ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}
-            onClick={() => setSubTab("notices")}
-          >
-            Notice Board
-          </button>
-        </div>
-      )}
+        ))}
+      </div>
 
-      {!canSeePlayerMessages || subTab === "notices" ? (
+      {subTab === "banners" ? (
+        <HomeBannersSection role={role} staffId={staffId} staffTeams={staffTeams} ageGroups={ageGroups} />
+      ) : !canSeePlayerMessages || subTab === "notices" ? (
         <NoticeBoardSection notices={notices} role={role} staffId={staffId} onAdd={() => setEditingNotice("new")} onEdit={(n) => setEditingNotice(n)} />
       ) : (
       <>
@@ -272,9 +277,17 @@ function NoticeBoardSection({ notices, role, staffId, onAdd, onEdit }) {
               const editable = canEdit(n);
               return (
                 <tr key={n.id} className={editable ? "clickable" : ""} onClick={() => editable && onEdit(n)}>
-                  <td style={{ fontWeight: 600 }}>{n.title}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    {n.title}
+                    {(n.locationLink || n.locationEmbed) && (
+                      <span title="Includes a location for the Player Portal" style={{ marginLeft: 4 }}>📍</span>
+                    )}
+                  </td>
                   <td><span className="gfc-agepill">{CATEGORY_LABELS[n.category] || n.category}</span></td>
-                  <td><span className="gfc-agepill" style={{ background: T.indigoSoft }}>{n.targetAgeGroup || "ALL"}</span></td>
+                  <td>
+                    <span className="gfc-agepill" style={{ background: T.indigoSoft }}>{audienceLabel(n.targetAgeGroups)}</span>
+                    {n.showToSupporters && <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 3 }}>+ supporters</div>}
+                  </td>
                   <td>{n.pinned ? "📌 Yes" : "—"}</td>
                   <td style={{ fontSize: 11.5, color: T.inkSoft }}>{n.postedByEmail || "—"}</td>
                   <td style={{ fontSize: 11.5, color: T.inkSoft }}>{n.postedAt ? new Date(n.postedAt).toLocaleDateString("en-ZA") : "—"}</td>
@@ -310,7 +323,11 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
     body: notice?.body || "",
     category: notice?.category || "announcement",
     pinned: notice?.pinned || false,
-    targetAgeGroup: notice?.targetAgeGroup || (isAdminOrTreasurer ? "ALL" : myTeams[0] || ""),
+    // [] = everyone. Coaches start with their only team ticked, if they have one.
+    targetAgeGroups: notice ? notice.targetAgeGroups || [] : (isAdminOrTreasurer ? [] : myTeams.length === 1 ? [myTeams[0]] : []),
+    locationLink: notice?.locationLink || "",
+    locationEmbed: notice?.locationEmbed || "",
+    showToSupporters: !!notice?.showToSupporters,
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -321,10 +338,19 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.title.trim() || !form.body.trim() || !form.targetAgeGroup) return;
+    if (!form.title.trim() || !form.body.trim()) return;
+    if (!isAdminOrTreasurer && form.targetAgeGroups.length === 0) {
+      setError("Tick at least one of your teams.");
+      return;
+    }
+    const loc = checkLocationFields(form);
+    if (!loc.ok) {
+      setError(loc.errors.link || loc.errors.embed);
+      return;
+    }
     setBusy(true);
     setError("");
-    const result = await onSave(form);
+    const result = await onSave({ ...form, locationLink: loc.locationLink, locationEmbed: loc.locationEmbed });
     if (result?.error) setError(result.error);
     else onClose();
     setBusy(false);
@@ -363,19 +389,29 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
                 <option value="training">Training</option>
               </select>
             </div>
-            <div className="gfc-field">
-              <label className="gfc-label">Target</label>
-              <select className="gfc-select" value={form.targetAgeGroup} onChange={(e) => update("targetAgeGroup", e.target.value)} disabled={targetOptions.length === 0}>
-                {isAdminOrTreasurer && <option value="ALL">All players</option>}
-                {targetOptions.map((g) => <option key={g} value={g}>{g}</option>)}
-              </select>
-            </div>
           </div>
+          <AgeGroupPicker
+            id="notice-target"
+            value={form.targetAgeGroups}
+            onChange={(v) => update("targetAgeGroups", v)}
+            options={sortGroups(targetOptions)}
+            allowEveryone={isAdminOrTreasurer}
+          />
           {!isAdminOrTreasurer && targetOptions.length === 0 && (
             <div style={{ fontSize: 11.5, color: T.danger, fontWeight: 600, marginBottom: 10 }}>
               You don't have any teams assigned yet — ask an Admin to assign you one in Users before you can post.
             </div>
           )}
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, margin: "0 0 14px", cursor: "pointer" }}>
+            <input type="checkbox" checked={form.showToSupporters} onChange={(e) => update("showToSupporters", e.target.checked)} style={{ marginTop: 2, accentColor: T.indigo }} />
+            <span>
+              <b>Also show to supporters</b>
+              <span style={{ display: "block", fontSize: 11.5, color: T.inkSoft, marginTop: 2 }}>
+                Supporters (fans without a player) only see notices with this ticked. Leave it off for team notices like training changes.
+              </span>
+            </span>
+          </label>
+          <LocationFields link={form.locationLink} embed={form.locationEmbed} onChange={update} />
           <div className="gfc-field">
             <label className="gfc-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <input type="checkbox" checked={form.pinned} onChange={(e) => update("pinned", e.target.checked)} />
@@ -393,7 +429,7 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
               </button>
             )}
             <button type="button" className="gfc-btn gfc-btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy || !form.targetAgeGroup}>{busy ? "Saving…" : "Save"}</button>
+            <button type="submit" className="gfc-btn gfc-btn-primary" disabled={busy || (!isAdminOrTreasurer && form.targetAgeGroups.length === 0)}>{busy ? "Saving…" : "Save"}</button>
           </div>
         </form>
       </div>

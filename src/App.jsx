@@ -47,9 +47,12 @@ import { FinanceView, FinanceEntryModal } from "./components/Finance.jsx";
 import { BackupsView } from "./components/Backups.jsx";
 import { FixturesPostView } from "./components/FixturesPost.jsx";
 import { FixturesView } from "./components/Fixtures.jsx";
+import { CalendarView } from "./components/Calendar.jsx";
 import { SettingsView, LeagueSourceModal } from "./components/Settings.jsx";
 import { UsersView } from "./components/Users.jsx";
 import { RefereePayView } from "./components/RefereePay.jsx";
+import { StoreView } from "./components/Store.jsx";
+import { SupportersView } from "./components/Supporters.jsx";
 import { LoginView, AcceptInviteView, NoAccessView } from "./components/Auth.jsx";
 
 /* ---------- HELPERS ---------- */
@@ -67,7 +70,9 @@ const CLUB_OPS_NAV = [
   { id: "squad", label: "Squad", icon: "▤", roles: ["admin", "coach"] },
   { id: "matchday", label: "Matchday", icon: "⚽", roles: ["admin", "coach"] },
   { id: "fixtures", label: "Fixtures", icon: "📋", roles: ["admin", "treasurer", "coach", "referee"] },
+  { id: "calendar", label: "Calendar", icon: "📅", roles: ["admin", "treasurer", "coach", "referee"] },
   { id: "kit", label: "Kit", icon: "▦", roles: ["admin", "coach"] },
+  { id: "store", label: "Store", icon: "🛍", roles: ["admin", "treasurer"] },
 ];
 
 const ADMIN_NAV = [
@@ -76,9 +81,20 @@ const ADMIN_NAV = [
   { id: "backups", label: "Backups", icon: "⟳", roles: ["admin"] },
   { id: "settings", label: "Settings", icon: "⚙", roles: ["admin", "treasurer"] },
   { id: "users", label: "Users", icon: "👤", roles: ["admin"] },
+  { id: "supporters", label: "Supporters", icon: "📣", roles: ["admin", "treasurer"] },
 ];
 
-function MainApp({ role, staffId, onLogout }) {
+// A Chairman has exactly the same access as an Admin everywhere in this
+// app (and the database treats them the same - see
+// migrations/2026-09-chairman-and-home-banners.sql). Every access decision
+// below uses `role`, which is "admin" for a Chairman; `accountRole` is only
+// used to show the account's real role.
+function accessRoleFor(accountRole) {
+  return accountRole === "chairman" ? "admin" : accountRole;
+}
+
+function MainApp({ role: accountRole, staffId, onLogout }) {
+  const role = accessRoleFor(accountRole);
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -280,11 +296,22 @@ function MainApp({ role, staffId, onLogout }) {
           division: f.divisionKey || "",
         };
         if (existing) {
-          const { error } = await supabase.from("matches").update(basicFields).eq("id", existing.id);
+          // A location is only copied onto an existing Matchday entry if
+          // that entry doesn't have its own yet, so a location a coach set
+          // directly on the Matchday entry is never overwritten.
+          const locationFields = {};
+          if (f.locationLink && !existing.locationLink) locationFields.location_link = f.locationLink;
+          if (f.locationEmbed && !existing.locationEmbed) locationFields.location_embed = f.locationEmbed;
+          const { error } = await supabase.from("matches").update({ ...basicFields, ...locationFields }).eq("id", existing.id);
           if (error) throw error;
           updated++;
         } else {
-          const { error } = await supabase.from("matches").insert({ ...basicFields, fixture_id: f.id });
+          const { error } = await supabase.from("matches").insert({
+            ...basicFields,
+            location_link: f.locationLink || null,
+            location_embed: f.locationEmbed || null,
+            fixture_id: f.id,
+          });
           if (error) throw error;
           created++;
         }
@@ -317,6 +344,8 @@ function MainApp({ role, staffId, onLogout }) {
             venue: form.venue || "",
             home_away: form.homeAway || "H",
             referee_id: form.refereeId || null,
+            location_link: form.locationLink || null,
+            location_embed: form.locationEmbed || null,
             updated_at: new Date().toISOString(),
           })
           .eq("id", form.id);
@@ -339,6 +368,8 @@ function MainApp({ role, staffId, onLogout }) {
           venue: form.venue || "",
           home_away: form.homeAway || "H",
           referee_id: form.refereeId || null,
+          location_link: form.locationLink || null,
+          location_embed: form.locationEmbed || null,
         });
         if (error) throw error;
       }
@@ -508,9 +539,45 @@ function MainApp({ role, staffId, onLogout }) {
       // The account can be successfully linked even if the invite email
       // itself failed to send - surface both, so the UI never claims
       // "invite sent" when it wasn't.
-      return { success: true, emailSent: !!data.emailSent, emailError: data.emailError || null };
+      return {
+        success: true,
+        emailSent: !!data.emailSent,
+        emailError: data.emailError || null,
+        alreadyRegistered: !!data.alreadyRegistered,
+        alreadyLinked: !!data.alreadyLinked,
+      };
     } catch (e) {
       return { error: e.message || "Failed to send app invite." };
+    }
+  }
+
+  // Lists every Player Portal login linked to a player (e.g. both
+  // parents). Goes through an Edge Function because login emails and
+  // activation status live in Supabase Auth, not a public table.
+  async function listPlayerGuardians(playerId) {
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-player-guardians", {
+        body: { action: "list", playerId },
+      });
+      if (error || data?.error) throw new Error(await extractFunctionErrorMessage(error, data));
+      return { accounts: data.accounts || [] };
+    } catch (e) {
+      return { error: e.message || "Could not load linked accounts." };
+    }
+  }
+
+  // Unlinks ONE login from ONE player. The login itself is kept, since it
+  // may also be linked to a sibling or belong to a staff member.
+  async function removePlayerGuardian(playerId, authUserId) {
+    try {
+      const { data, error } = await supabase.functions.invoke("manage-player-guardians", {
+        body: { action: "remove", playerId, authUserId },
+      });
+      if (error || data?.error) throw new Error(await extractFunctionErrorMessage(error, data));
+      await loadPlayers();
+      return { success: true };
+    } catch (e) {
+      return { error: e.message || "Could not remove access." };
     }
   }
 
@@ -584,7 +651,7 @@ function MainApp({ role, staffId, onLogout }) {
     try {
       const { data: rows, error } = await supabase
         .from("players")
-        .select("*, payments(*), player_status_log(*)")
+        .select("*, payments(*), player_status_log(*), guardian_players(auth_user_id)")
         .order("name", { ascending: true });
       if (error) throw error;
       setPlayers((rows || []).map(fromDbPlayer));
@@ -1410,7 +1477,7 @@ function MainApp({ role, staffId, onLogout }) {
           })()}
         </nav>
         <div className="gfc-sidebar-foot">
-          <div style={{ marginBottom: 8, textTransform: "capitalize" }}>{role} account</div>
+          <div style={{ marginBottom: 8, textTransform: "capitalize" }}>{accountRole} account</div>
           <button
             onClick={onLogout}
             style={{ background: "none", border: "none", color: T.gold, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0, marginBottom: 8 }}
@@ -1510,6 +1577,9 @@ function MainApp({ role, staffId, onLogout }) {
           />
         )}
 
+        {tab === "store" && <StoreView role={role} />}
+        {tab === "supporters" && <SupportersView clubSettings={clubSettings} />}
+
         {tab === "kit" && (
           <KitView
             inventory={inventory}
@@ -1560,6 +1630,16 @@ function MainApp({ role, staffId, onLogout }) {
             onSaveDivisionLabel={saveDivisionLabel}
             onSaveFixture={saveFixture}
             onDeleteFixture={deleteFixture}
+          />
+        )}
+
+        {tab === "calendar" && (
+          <CalendarView
+            role={role}
+            staffId={staffId}
+            fixtures={fixtures}
+            matches={matches}
+            onOpenTab={setTab}
           />
         )}
 
@@ -1633,6 +1713,8 @@ function MainApp({ role, staffId, onLogout }) {
           onDelete={deletePlayer}
           onManageTiers={() => setManagingTiers(true)}
           onInvitePlayer={invitePlayer}
+          onListGuardians={listPlayerGuardians}
+          onRemoveGuardian={removePlayerGuardian}
         />
       )}
 
