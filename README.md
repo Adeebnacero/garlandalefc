@@ -221,6 +221,16 @@ A **Calendar** tab (after Fixtures) shows club events and fixtures in a week, mo
 - **Notice Board:** adding, changing or deleting an event can also post a notice to everyone, which shows the unread badge in the Player Portal.
 - **Not yet in backups:** the two calendar tables (`calendar_categories`, `calendar_events`) aren't included in Backups yet.
 
+## Urgent notices and phone notifications (October 2026)
+
+The Player Portal sends new notices to phones that have notifications on, at five past each hour from 7am to 9pm. In **Messages → Notice Board**, the notice form now has an **Urgent** tick box: urgent notices also go out between 9pm and 7am, at the next five past. Admin, Treasurer and coaches (for their own teams) can tick it.
+
+**Setting it up:** run `migrations/2026-10-push-notifications.sql` in the Supabase SQL Editor (safe to run more than once), after the Player Portal's `0006_notice_pushes.sql`. Then deploy this app.
+
+- **When it goes out:** the form shows when phones will get the notice if you save now (for example "tomorrow at 07:05", or "at 22:05" with Urgent ticked). The Notice Board list shows "To phones at …" under notices that haven't gone out yet, and an Urgent tag.
+- **Edits don't re-send:** once a notice has gone to phones, the Urgent box is replaced by a note, and saving changes won't notify phones again. The database also stops anyone signed in from making a notice go out twice.
+- **Backups:** restoring a backup never sends notices to phones, and backups made before notifications existed still restore.
+
 ## A note on the team sheet
 
 The printable sheet opens in a new browser tab/window and calls the browser's

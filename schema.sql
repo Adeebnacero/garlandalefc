@@ -426,6 +426,38 @@ drop trigger if exists notices_set_posted_by on notices;
 create trigger notices_set_posted_by before insert on notices
   for each row execute function set_notice_posted_by();
 
+-- ---------- Push notifications: don't let a signed-in user un-send a notice ----------
+-- Clearing push_sent_at would make the hourly job push a notice to phones
+-- again. Only the job itself (service role) may do that - it hands notices
+-- back if a run fails before sending. Signed-in staff can still edit
+-- everything else, and setting it (as the restore does) is always fine.
+create or replace function keep_notice_push_sent_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.push_sent_at is not null
+     and new.push_sent_at is distinct from old.push_sent_at
+     and coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') in ('authenticated', 'anon') then
+    new.push_sent_at := old.push_sent_at;
+  end if;
+  return new;
+end;
+$$;
+
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'notices' and column_name = 'push_sent_at') then
+    drop trigger if exists notices_keep_push_sent_at on notices;
+    create trigger notices_keep_push_sent_at before update of push_sent_at on notices
+      for each row execute function keep_notice_push_sent_at();
+  end if;
+end $$;
+-- (notices.push_sent_at and notices.urgent come from the Player Portal's
+-- migration 0006_notice_pushes.sql; see migrations/2026-10-push-notifications.sql.)
+
+
 -- ---------- division label mappings (fixture spreadsheet import) ----------
 -- The federation's fixture spreadsheet uses its own division naming (e.g.
 -- "D4 - 6th Division") which doesn't match the club's own friendly team
@@ -645,6 +677,13 @@ begin
     select * from jsonb_populate_recordset(null::fixtures, coalesce(snapshot->'fixtures', '[]'::jsonb));
   insert into notices
     select * from jsonb_populate_recordset(null::notices, coalesce(snapshot->'notices', '[]'::jsonb));
+  -- Restored notices never go to phones (again): mark them as handled for
+  -- the Player Portal's hourly push job. Checked by name so this still
+  -- works on a database that doesn't have push notifications set up.
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'notices' and column_name = 'push_sent_at') then
+    execute 'update notices set push_sent_at = now() where push_sent_at is null';
+  end if;
 
   if snapshot ? 'club_settings' and jsonb_array_length(coalesce(snapshot->'club_settings', '[]'::jsonb)) > 0 then
     insert into club_settings
@@ -1576,6 +1615,13 @@ begin
     select * from jsonb_populate_recordset(null::referee_appointments, coalesce(snapshot->'referee_appointments', '[]'::jsonb));
   insert into notices
     select * from jsonb_populate_recordset(null::notices, coalesce(snapshot->'notices', '[]'::jsonb));
+  -- Restored notices never go to phones (again): mark them as handled for
+  -- the Player Portal's hourly push job. Checked by name so this still
+  -- works on a database that doesn't have push notifications set up.
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'notices' and column_name = 'push_sent_at') then
+    execute 'update notices set push_sent_at = now() where push_sent_at is null';
+  end if;
 
   if snapshot ? 'club_settings' and jsonb_array_length(coalesce(snapshot->'club_settings', '[]'::jsonb)) > 0 then
     insert into club_settings

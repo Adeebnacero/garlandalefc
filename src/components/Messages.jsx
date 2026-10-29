@@ -5,8 +5,17 @@ import { Badge, LocationFields, AgeGroupPicker } from "./shared.jsx";
 import { audienceLabel, sortGroups } from "../lib/audience.js";
 import { checkLocationFields } from "../lib/mapLinks.js";
 import { HomeBannersSection } from "./HomeBanners.jsx";
+import { nextPushTime, whenLabel } from "../lib/pushTiming.js";
 
 const CATEGORY_LABELS = { announcement: "Announcement", training: "Training", birthday: "🎂 Birthday" };
+
+// "To phones at 11:05" for a notice the hourly push job hasn't sent yet.
+// The job skips anything left waiting over a day, so those show nothing.
+function phonesPendingLabel(n, now = new Date()) {
+  if (n.pushSentAt || !n.postedAt) return "";
+  if (now.getTime() - new Date(n.postedAt).getTime() > 24 * 3600 * 1000) return "";
+  return `To phones ${whenLabel(nextPushTime(now, n.urgent), now)}`;
+}
 
 export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds, templateId, setTemplateId, customText, setCustomText, onEmailStatement, onBulkEmailStatements, emailBusy, emailMessage, pendingReminderBatch, onDismissReminderBatch, notices, editingNotice, setEditingNotice, onSaveNotice, onDeleteNotice, role, staffId, staffTeams }) {
   // Coaches only get the Notice Board here - "Player Messages" surfaces
@@ -282,6 +291,9 @@ function NoticeBoardSection({ notices, role, staffId, onAdd, onEdit }) {
                     {(n.locationLink || n.locationEmbed) && (
                       <span title="Includes a location for the Player Portal" style={{ marginLeft: 4 }}>📍</span>
                     )}
+                    {n.urgent && (
+                      <span className="gfc-agepill" style={{ marginLeft: 6, background: T.dangerSoft, color: T.danger }} title="Also sent to phones between 9pm and 7am">Urgent</span>
+                    )}
                   </td>
                   <td><span className="gfc-agepill">{CATEGORY_LABELS[n.category] || n.category}</span></td>
                   <td>
@@ -290,7 +302,10 @@ function NoticeBoardSection({ notices, role, staffId, onAdd, onEdit }) {
                   </td>
                   <td>{n.pinned ? "📌 Yes" : "—"}</td>
                   <td style={{ fontSize: 11.5, color: T.inkSoft }}>{n.postedByEmail || "—"}</td>
-                  <td style={{ fontSize: 11.5, color: T.inkSoft }}>{n.postedAt ? new Date(n.postedAt).toLocaleDateString("en-ZA") : "—"}</td>
+                  <td style={{ fontSize: 11.5, color: T.inkSoft }}>
+                    {n.postedAt ? new Date(n.postedAt).toLocaleDateString("en-ZA") : "—"}
+                    {phonesPendingLabel(n) && <div style={{ marginTop: 3 }}>{phonesPendingLabel(n)}</div>}
+                  </td>
                   <td>
                     {editable ? (
                       <button className="gfc-btn gfc-btn-outline gfc-btn-sm" onClick={(e) => { e.stopPropagation(); onEdit(n); }}>Edit</button>
@@ -328,7 +343,10 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
     locationLink: notice?.locationLink || "",
     locationEmbed: notice?.locationEmbed || "",
     showToSupporters: !!notice?.showToSupporters,
+    urgent: !!notice?.urgent,
   }));
+  // Already handled by the hourly push job: editing won't notify phones again.
+  const sentToPhones = !!notice?.pushSentAt;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -411,6 +429,24 @@ function NoticeModal({ notice, role, staffId, staffTeams, ageGroups, onClose, on
               </span>
             </span>
           </label>
+          {sentToPhones ? (
+            <div style={{ fontSize: 11.5, color: T.inkSoft, margin: "0 0 14px" }}>
+              Saving changes won't send this notice to phones again.
+            </div>
+          ) : (
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, margin: "0 0 14px", cursor: "pointer" }}>
+              <input type="checkbox" checked={form.urgent} onChange={(e) => update("urgent", e.target.checked)} style={{ marginTop: 2, accentColor: T.danger }} />
+              <span>
+                <b>Urgent</b>
+                <span style={{ display: "block", fontSize: 11.5, color: T.inkSoft, marginTop: 2 }}>
+                  Phones get new notices at five past each hour, from 7am to 9pm. Urgent ones also go out at night, so tick this only if it can't wait until morning, like training cancelled tonight.
+                </span>
+                <span style={{ display: "block", fontSize: 11.5, fontWeight: 600, marginTop: 4 }}>
+                  Saved now, phones get it {whenLabel(nextPushTime(new Date(), form.urgent))}.
+                </span>
+              </span>
+            </label>
+          )}
           <LocationFields link={form.locationLink} embed={form.locationEmbed} onChange={update} />
           <div className="gfc-field">
             <label className="gfc-label" style={{ display: "flex", alignItems: "center", gap: 6 }}>

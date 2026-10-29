@@ -337,6 +337,10 @@ export function fromDbNotice(row) {
     locationLink: row.location_link || "",
     locationEmbed: row.location_embed || "",
     showToSupporters: !!row.show_to_supporters,
+    // Push notifications (Player Portal's hourly job). pushSentAt is read
+    // only - the job stamps it; the client never writes it.
+    urgent: !!row.urgent,
+    pushSentAt: row.push_sent_at || null,
   };
 }
 
@@ -359,5 +363,6 @@ export function toDbNotice(form, staffId) {
     location_link: form.locationLink || null,
     location_embed: form.locationEmbed || null,
     show_to_supporters: !!form.showToSupporters,
+    urgent: !!form.urgent,
   };
 }
