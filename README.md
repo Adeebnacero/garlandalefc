@@ -231,6 +231,16 @@ The Player Portal sends new notices to phones that have notifications on, at fiv
 - **Edits don't re-send:** once a notice has gone to phones, the Urgent box is replaced by a note, and saving changes won't notify phones again. The database also stops anyone signed in from making a notice go out twice.
 - **Backups:** restoring a backup never sends notices to phones, and backups made before notifications existed still restore.
 
+## In-app player messages (October 2026, in progress)
+
+Private messages to individual players, sent from **Messages → Player Messages** and read by their guardians in the Player Portal (side panel → Messages). Unlike notices they're personal, so they can include things like a player's balance. Being built in four stages: the database (done), the Send in app button and history here, the Messages page in the Player Portal, then phone notifications.
+
+**Stage 1, the database:** run `migrations/2026-10-player-messages.sql` in the Supabase SQL Editor (safe to run more than once). Nothing changes on screen yet.
+
+- **Who:** Admin, Chairman and Treasurer can send, see the history and withdraw a send. Coaches and referees can't see these, like the rest of Player Messages.
+- **Sending** is all-or-nothing through one checked database function: up to 500 players and 1000 characters per message.
+- **Kept for 90 days**, then removed by a daily job. Not included in Backups; restoring a backup clears them.
+
 ## A note on the team sheet
 
 The printable sheet opens in a new browser tab/window and calls the browser's
