@@ -241,6 +241,8 @@ Private messages to individual players, sent from **Messages → Player Messages
 - **Sending** is all-or-nothing through one checked database function: up to 500 players and 1000 characters per message.
 - **Kept for 90 days**, then removed by a daily job. Not included in Backups; restoring a backup clears them.
 
+**Stage 2, sending (this app):** in **Player Messages**, step 3 now has **Send in app (N)**, where N is how many selected players have a Player Portal login. Each send row shows an *In app* or *No app* tag. The confirm box shows exactly what one guardian will see and lists anyone who won't get it, who stay selected for WhatsApp, SMS or Email. Below, **Sent in app** lists the last 90 days of sends with how many have been read; **Who** shows each player's read status, and **Withdraw** removes a send from everyone's Messages. Guardians can't see messages until stage 3 adds the Messages page to the Player Portal.
+
 ## A note on the team sheet
 
 The printable sheet opens in a new browser tab/window and calls the browser's
