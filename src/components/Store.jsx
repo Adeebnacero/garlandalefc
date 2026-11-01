@@ -5,11 +5,13 @@ import {
   blankProduct, validateProduct, stockSummary, availability, storeStats, adminFee,
   validateSettings, policySections, friendlyStoreError, SIZE_PRESETS, PHOTO_MAX_INPUT_BYTES,
   groupStatus, orderStatus, nextStep, orderStats, supplierSummary, filterOrders, ordersToCsv, parsePrice,
+  playersByGuardianPhone, orderPlayers, playerLabel,
 } from "../lib/store.js";
+import { computeAgeGroup } from "../lib/billing.js";
 import {
   loadStore, photoUrl, preparePhoto, uploadPhoto, removePhoto, saveProduct,
   deleteProduct, moveProduct, setProductVisible, saveSettings,
-  loadOrders, advanceItems, markSupplierOrdered, recordRefund, resolveAttention,
+  loadOrders, loadSquadForOrders, advanceItems, markSupplierOrdered, recordRefund, resolveAttention,
 } from "../lib/storeApi.js";
 
 // ---------------------------------------------------------------------------
@@ -86,7 +88,10 @@ tr.st-row:hover td { background: ${T.paperDim}; }
 .st-pills { display: flex; flex-wrap: wrap; gap: 6px; }
 .st-pills span { background: #fff; border: 1px solid #d9d3ef; border-radius: 999px; padding: 3px 10px; font-size: 12px; }
 .st-pills b { font-family: 'JetBrains Mono', monospace; margin-left: 4px; }
-.st-order-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+.st-order-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 16px; }
+.st-player { font-weight: 700; }
+.st-player-for { display: block; color: ${T.inkSoft}; font-size: 11.5px; font-weight: 500; }
+.st-match { font-style: italic; }
 .st-box { background: #faf8f2; border: 1px solid ${T.line}; border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.6; }
 .st-box h4 { margin: 0 0 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: ${T.inkSoft}; }
 .st-group { border: 1px solid ${T.line}; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
@@ -766,12 +771,40 @@ const fmtStamp = (iso) => {
 };
 const lineLabel = (l) => `${l.quantity} × ${l.name}${l.size ? ` (${l.size})` : ""}`;
 
+/** Player column in the orders list. */
+function PlayerCell({ who }) {
+  if (who.recorded.length) {
+    return who.recorded.map((p) => (
+      <div key={p.id || p.name}><span className="st-player">{p.name}</span>{p.ageGroup && <div className="st-muted">{p.ageGroup}</div>}</div>
+    ));
+  }
+  if (who.matched.length === 1) {
+    const p = who.matched[0];
+    return (
+      <div title="Not recorded at checkout. Matched by the guardian’s phone number in the squad list.">
+        <span className="st-match">{p.name}</span>
+        <div className="st-muted">{p.ageGroup ? `${p.ageGroup} · ` : ""}matched by phone</div>
+      </div>
+    );
+  }
+  if (who.matched.length > 1) {
+    return (
+      <div title={who.matched.map(playerLabel).join(", ")}>
+        <span className="st-muted">Not recorded</span>
+        <div className="st-muted">{who.matched.length} players on this phone</div>
+      </div>
+    );
+  }
+  return <span className="st-muted">Not recorded</span>;
+}
+
 function OrdersPanel({ products, onStockChanged, showToast }) {
   const [orders, setOrders] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState({ q: "", status: "open", period: "all" });
   const [openId, setOpenId] = useState(null);
   const [busy, setBusy] = useState("");
+  const [squad, setSquad] = useState([]);
 
   const reload = useCallback(async () => {
     try {
@@ -782,9 +815,21 @@ function OrdersPanel({ products, onStockChanged, showToast }) {
     }
   }, []);
   useEffect(() => { reload(); }, [reload]);
+  // Only used to suggest the player on orders where checkout didn't record
+  // one. If it can't load, those orders just show "Not recorded".
+  useEffect(() => {
+    loadSquadForOrders()
+      .then((rows) => setSquad(rows.map((r) => ({
+        id: r.id, name: r.name, guardianPhone: r.guardian_phone,
+        ageGroup: r.age_group_override || computeAgeGroup(r.dob),
+      }))))
+      .catch(() => setSquad([]));
+  }, []);
 
   const today = todayISO();
-  const list = useMemo(() => (orders ? filterOrders(orders, filter, today) : []), [orders, filter, today]);
+  const byPhone = useMemo(() => playersByGuardianPhone(squad), [squad]);
+  const withPlayers = useMemo(() => (orders ? orders.map((o) => ({ ...o, who: orderPlayers(o, byPhone) })) : null), [orders, byPhone]);
+  const list = useMemo(() => (withPlayers ? filterOrders(withPlayers, filter, today) : []), [withPlayers, filter, today]);
   const stats = useMemo(() => orderStats(orders || [], today.slice(0, 7)), [orders, today]);
   const supplier = useMemo(() => supplierSummary(orders || []), [orders]);
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
@@ -825,7 +870,7 @@ function OrdersPanel({ products, onStockChanged, showToast }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  const open = openId ? orders.find((o) => o.id === openId) : null;
+  const open = openId ? withPlayers.find((o) => o.id === openId) : null;
 
   return (
     <>
@@ -873,7 +918,7 @@ function OrdersPanel({ products, onStockChanged, showToast }) {
           </div>
         </div>
         <div className="st-filters">
-          <input className="gfc-input" style={{ minWidth: 260 }} placeholder="Search order number, name, email or phone" aria-label="Search orders"
+          <input className="gfc-input" style={{ minWidth: 260 }} placeholder="Search order number, guardian, player, email or phone" aria-label="Search orders"
             value={filter.q} onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))} />
           <select className="gfc-select" aria-label="Status" value={filter.status} onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value }))}>
             <option value="open">Open orders</option>
@@ -900,13 +945,14 @@ function OrdersPanel({ products, onStockChanged, showToast }) {
         ) : (
           <div className="st-scroll" style={{ marginTop: 14 }}>
             <table className="gfc-table">
-              <thead><tr><th>Order</th><th>Paid</th><th>Guardian</th><th>Items</th><th>Total</th><th>Status</th></tr></thead>
+              <thead><tr><th>Order</th><th>Paid</th><th>Guardian</th><th>Player</th><th>Items</th><th>Total</th><th>Status</th></tr></thead>
               <tbody>
                 {list.map((o) => (
                   <tr key={o.id} className="st-row" tabIndex={0} onClick={() => setOpenId(o.id)} onKeyDown={(e) => { if (e.key === "Enter") setOpenId(o.id); }}>
                     <td className="gfc-mono" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{o.number}{o.needsAttention && <span className="st-flag">Check</span>}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{fmtDate(o.paidAt)}</td>
                     <td>{o.guardianName}<div className="st-muted">{o.guardianPhone}</div></td>
+                    <td><PlayerCell who={o.who} /></td>
                     <td style={{ fontSize: 12.5 }}>{o.lines.map((l) => <div key={l.id}>{lineLabel(l)}</div>)}</td>
                     <td className="st-money">{fmtMoney(o.total)}</td>
                     <td><OrderBadge status={orderStatus(o)} /></td>
@@ -946,6 +992,9 @@ function OrderModal({ order, onClose, onChanged }) {
     ["Pre-order items", order.lines.filter((l) => l.isPreorder), true],
   ].filter((g) => g[1].length);
   const refundable = order.lines.some((l) => l.status !== "refunded");
+  const who = order.who || orderPlayers(order);
+  // Name the player on each line only when the order covers more than one.
+  const perLinePlayer = who.recorded.length > 1;
 
   async function run(key, fn, msg, stockChanged = false) {
     setBusy(key);
@@ -993,6 +1042,25 @@ function OrderModal({ order, onClose, onChanged }) {
         <div className="st-order-grid">
           <div className="st-box"><h4>Guardian</h4>{order.guardianName}<br />{order.guardianPhone}<br />{order.guardianEmail}</div>
           <div className="st-box">
+            <h4>{who.recorded.length > 1 ? "Players" : "Player"}</h4>
+            {who.recorded.map((p) => (
+              <div key={p.id || p.name}><span className="st-player">{p.name}</span>{p.ageGroup && <> · {p.ageGroup}</>}</div>
+            ))}
+            {who.missing && (
+              who.matched.length ? (
+                <>
+                  {who.matched.map((p) => <div key={p.id} className="st-match">{playerLabel(p)}</div>)}
+                  <span className="st-muted">
+                    {who.recorded.length ? "Some items have no player recorded. " : "Not recorded at checkout. "}
+                    {who.matched.length === 1 ? "Matched" : "These players match"} by the guardian’s phone number in the squad list{who.matched.length > 1 ? "; check with the guardian which one it’s for" : ""}.
+                  </span>
+                </>
+              ) : (
+                <span className="st-muted">{who.recorded.length ? "Some items have no player recorded." : "Not recorded at checkout, and no squad player has this guardian’s phone number."}</span>
+              )
+            )}
+          </div>
+          <div className="st-box">
             <h4>Payment</h4>
             Items {fmtMoney(order.subtotal)}{order.adminFee > 0 && <> + admin fee {fmtMoney(order.adminFee)}</>}<br />
             <b>{fmtMoney(order.total)}</b> paid {fmtDate(order.paidAt)} via Yoco<br />
@@ -1008,7 +1076,10 @@ function OrderModal({ order, onClose, onChanged }) {
               <div className="st-group-head"><b style={{ fontSize: 13 }}>{groups.length > 1 ? title : "Items"}</b><OrderBadge status={groupStatus(lines)} /></div>
               {lines.map((l) => (
                 <div className="st-line" key={l.id}>
-                  <span>{lineLabel(l)}{l.stockShort && <span className="st-short">Sold out when paid</span>}</span>
+                  <span>
+                    {lineLabel(l)}{l.stockShort && <span className="st-short">Sold out when paid</span>}
+                    {perLinePlayer && <span className="st-player-for">for {l.playerName ? playerLabel({ name: l.playerName, ageGroup: l.playerAgeGroup }) : "no player recorded"}</span>}
+                  </span>
                   <span className="st-money">{fmtMoney(l.quantity * l.unitPrice)}</span>
                 </div>
               ))}

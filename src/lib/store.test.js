@@ -3,6 +3,7 @@ import {
   parsePrice, parsePercent, validateProduct, stockSummary, availability, storeStats,
   adminFee, validateSettings, policySections, photoTargetSize, photoPath, fromDbProduct,
   friendlyStoreError, blankProduct,
+  phoneKey, playersByGuardianPhone, orderPlayers, playerLabel,
 } from "./store.js";
 
 describe("parsePrice", () => {
@@ -226,5 +227,66 @@ describe("orders", () => {
     expect(lines[1]).toContain(`"'=HYPERLINK(""x"")"`);
     expect(lines[1]).toContain('"a,b@x.co"');
     expect(lines[1]).toContain("450.00,450.00,No,Paid,450.00,15.75,465.75,0.00,p_1");
+  });
+});
+
+describe("who an order is for", () => {
+  const squad = [
+    { id: "zaid", name: "Zaid Ebrahim", ageGroup: "U10", guardianPhone: "072 201 2008" },
+    { id: "amina", name: "Amina Ebrahim", ageGroup: "U8", guardianPhone: "+27 72 201 2008 / 083 111 2222" },
+    { id: "liam", name: "Liam Petersen", ageGroup: "U12", guardianPhone: "0821234567" },
+  ];
+  const byPhone = playersByGuardianPhone(squad);
+
+  it("maps the player snapshot from the database", () => {
+    const o = fromDbOrder({ store_order_items: [{ product_name: "Kit", unit_price: "1", quantity: 1, player_id: "zaid", player_name: "Zaid Ebrahim", player_age_group: "U10" }] });
+    expect(o.lines[0]).toMatchObject({ playerId: "zaid", playerName: "Zaid Ebrahim", playerAgeGroup: "U10" });
+    const old = fromDbOrder({ store_order_items: [{ product_name: "Kit", unit_price: "1", quantity: 1 }] });
+    expect(old.lines[0]).toMatchObject({ playerId: "", playerName: "", playerAgeGroup: "" });
+  });
+
+  it("normalises SA phone numbers", () => {
+    expect(phoneKey("072 201 2008")).toBe("722012008");
+    expect(phoneKey("+27 72 201 2008")).toBe("722012008");
+    expect(phoneKey("12345")).toBe("");
+    expect(byPhone.get("722012008").map((p) => p.id)).toEqual(["zaid", "amina"]);
+    expect(byPhone.get("831112222").map((p) => p.id)).toEqual(["amina"]);
+  });
+
+  it("uses the players recorded at checkout, one entry each", () => {
+    const who = orderPlayers(order({}, [
+      L({ playerId: "zaid", playerName: "Zaid Ebrahim", playerAgeGroup: "U10" }),
+      L({ playerId: "zaid", playerName: "Zaid Ebrahim", playerAgeGroup: "U10" }),
+      L({ playerId: "amina", playerName: "Amina Ebrahim", playerAgeGroup: "U8" }),
+    ]), byPhone);
+    expect(who.recorded.map(playerLabel)).toEqual(["Zaid Ebrahim (U10)", "Amina Ebrahim (U8)"]);
+    expect(who.matched).toEqual([]);
+    expect(who.missing).toBe(false);
+  });
+
+  it("suggests players by guardian phone only when none was recorded", () => {
+    const one = orderPlayers(order({ guardianPhone: "0821234567" }, [L()]), byPhone);
+    expect(one).toEqual({ recorded: [], matched: [{ id: "liam", name: "Liam Petersen", ageGroup: "U12" }], missing: true });
+    const siblings = orderPlayers(order({ guardianPhone: "0722012008" }, [L()]), byPhone);
+    expect(siblings.matched.map((p) => p.id)).toEqual(["zaid", "amina"]);
+    expect(orderPlayers(order({ guardianPhone: "0610000000" }, [L()]), byPhone).matched).toEqual([]);
+    expect(orderPlayers(order({}, [L()])).matched).toEqual([]); // no squad loaded
+  });
+
+  it("finds orders by player name", () => {
+    const list = [
+      order({ id: "a" }, [L({ playerName: "Zaid Ebrahim" })]),
+      { ...order({ id: "b", guardianPhone: "0821234567" }, [L()]) },
+    ].map((o) => ({ ...o, who: orderPlayers(o, byPhone) }));
+    expect(filterOrders(list, { status: "all", q: "zaid" }, "2026-09-25").map((o) => o.id)).toEqual(["a"]);
+    expect(filterOrders(list, { status: "all", q: "petersen" }, "2026-09-25").map((o) => o.id)).toEqual(["b"]);
+  });
+
+  it("exports the player, and a phone match only when it's unambiguous", () => {
+    const rows = (o) => ordersToCsv([{ ...o, who: orderPlayers(o, byPhone) }]).trim().split("\r\n");
+    expect(rows(order({}, [L()]))[0]).toContain("Email,Player,Age group,Player source,Product");
+    expect(rows(order({}, [L({ playerName: "Zaid Ebrahim", playerAgeGroup: "U10" })]))[1]).toContain("Zaid Ebrahim,U10,Checkout,Home jersey");
+    expect(rows(order({ guardianPhone: "0821234567" }, [L()]))[1]).toContain("Liam Petersen,U12,Matched by guardian phone,Home jersey");
+    expect(rows(order({ guardianPhone: "0722012008" }, [L()]))[1]).toContain(",,Not recorded,Home jersey");
   });
 });

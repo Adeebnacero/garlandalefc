@@ -241,6 +241,16 @@ Private messages to individual players, sent from **Messages → Player Messages
 - **Sending** is all-or-nothing through one checked database function: up to 500 players and 1000 characters per message.
 - **Kept for 90 days**, then removed by a daily job. Not included in Backups; restoring a backup clears them.
 
+**Stage 2, sending (this app):** in **Player Messages**, step 3 now has **Send in app (N)**, where N is how many selected players have a Player Portal login. Each send row shows an *In app* or *No app* tag. The confirm box shows exactly what one guardian will see and lists anyone who won't get it, who stay selected for WhatsApp, SMS or Email. Below, **Sent in app** lists the last 90 days of sends with how many have been read; **Who** shows each player's read status, and **Withdraw** removes a send from everyone's Messages. Guardians can't see messages until stage 3 adds the Messages page to the Player Portal.
+
+## Store orders show the player (November 2026)
+
+**Store → Orders** has a **Player** column, and each order shows a Player box with the player's name and age group. Search finds orders by player name, and the CSV has Player, Age group and Player source columns. When one order covers two players (siblings), each item says who it's for.
+
+The player is recorded per item at checkout in the Player Portal. Orders paid before that show the squad player whose guardian phone number matches, in italics and labelled *matched by phone*. If several players share that number, the order says so and staff check with the guardian.
+
+**Setting it up:** run `migrations/2026-11-store-order-players.sql` in the Supabase SQL Editor (safe to run more than once), then deploy this app. The Player Portal checkout then needs to ask which player each item is for and save `player_id` on each `store_order_items` row; the database fills in the name and age group itself.
+
 ## A note on the team sheet
 
 The printable sheet opens in a new browser tab/window and calls the browser's

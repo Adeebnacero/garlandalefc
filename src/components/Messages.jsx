@@ -6,6 +6,7 @@ import { audienceLabel, sortGroups } from "../lib/audience.js";
 import { checkLocationFields } from "../lib/mapLinks.js";
 import { HomeBannersSection } from "./HomeBanners.jsx";
 import { nextPushTime, whenLabel } from "../lib/pushTiming.js";
+import { useInAppReach, InAppTag, SendInAppModal, SentInAppHistory } from "./PlayerInAppMessages.jsx";
 
 const CATEGORY_LABELS = { announcement: "Announcement", training: "Training", birthday: "🎂 Birthday" };
 
@@ -57,6 +58,23 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
 
   const selectedPlayers = enriched.filter((p) => selectedIds.includes(p.id));
 
+  // Send in app: who among the selection has a Player Portal login.
+  const inApp = useInAppReach(canSeePlayerMessages ? selectedIds : []);
+  const inAppCount = selectedPlayers.filter((p) => inApp.reach.has(p.id)).length;
+  const [showSendInApp, setShowSendInApp] = useState(false);
+  const [inAppResult, setInAppResult] = useState("");
+  const [historyKey, setHistoryKey] = useState(0);
+  const nameById = useMemo(() => new Map(enriched.map((p) => [p.id, p.name])), [enriched]);
+
+  function handleInAppSent(sent, missing) {
+    setShowSendInApp(false);
+    setHistoryKey((k) => k + 1);
+    setInAppResult(
+      `Sent in app to ${sent} player${sent === 1 ? "" : "s"}.` +
+      (missing ? ` ${missing} without the app ${missing === 1 ? "is" : "are"} still selected below for WhatsApp, SMS or Email.` : "")
+    );
+  }
+
   return (
     <div>
       <div className="gfc-topbar">
@@ -106,7 +124,7 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
       )}
 
       <div style={{ background: T.amberSoft, border: `1px solid ${T.gold}`, borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#7a5410", marginBottom: 18 }}>
-        <strong>How sending works:</strong> there's no bulk-send API connected, so each message opens a pre-filled WhatsApp or SMS conversation for you to review and hit send on individually — nothing goes out automatically.
+        <strong>How sending works:</strong> <strong>Send in app</strong> delivers the message straight to the Player Portal for everyone selected who has it, in one go. WhatsApp and SMS open a pre-filled conversation for you to review and send one at a time.
       </div>
 
       <div className="gfc-row2" style={{ alignItems: "flex-start" }}>
@@ -169,15 +187,35 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
         <div className="gfc-panel-head">
           <div className="gfc-panel-title">3. Send ({selectedPlayers.length} selected)</div>
           {selectedPlayers.length > 0 && (
-            <button
-              className="gfc-btn gfc-btn-primary gfc-btn-sm"
-              onClick={() => onBulkEmailStatements(selectedPlayers.filter((p) => p.email))}
-              disabled={emailBusy || selectedPlayers.every((p) => !p.email)}
-            >
-              {emailBusy ? "Sending…" : `Email statements to all (${selectedPlayers.filter((p) => p.email).length})`}
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="gfc-btn gfc-btn-primary gfc-btn-sm"
+                onClick={() => { setInAppResult(""); setShowSendInApp(true); }}
+                disabled={inApp.loading || inAppCount === 0 || !String(rawText || "").trim()}
+                title={inApp.loading ? "Checking who has the app…" : inAppCount === 0 ? "None of the selected players have the Player Portal yet" : "Send to everyone selected who has the Player Portal"}
+              >
+                {inApp.loading ? "Send in app…" : `Send in app (${inAppCount})`}
+              </button>
+              <button
+                className="gfc-btn gfc-btn-outline gfc-btn-sm"
+                onClick={() => onBulkEmailStatements(selectedPlayers.filter((p) => p.email))}
+                disabled={emailBusy || selectedPlayers.every((p) => !p.email)}
+              >
+                {emailBusy ? "Sending…" : `Email statements to all (${selectedPlayers.filter((p) => p.email).length})`}
+              </button>
+            </div>
           )}
         </div>
+        {inAppResult && (
+          <div style={{ background: T.greenSoft, borderBottom: `1px solid ${T.line}`, padding: "8px 16px", fontSize: 12.5, color: T.green, fontWeight: 600 }}>
+            {inAppResult}
+          </div>
+        )}
+        {inApp.error && (
+          <div style={{ background: T.dangerSoft, borderBottom: `1px solid ${T.line}`, padding: "8px 16px", fontSize: 12.5, color: T.danger, fontWeight: 600 }}>
+            {inApp.error}
+          </div>
+        )}
         {emailMessage && (
           <div style={{ background: T.amberSoft, border: `1px solid ${T.gold}`, borderBottom: "none", padding: "8px 16px", fontSize: 12, color: "#7a5410" }}>
             {emailMessage}
@@ -197,7 +235,10 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
                 <div key={p.id} className="gfc-send-row">
                   <div>
                     <div style={{ fontWeight: 600 }}>{p.name}</div>
-                    <div style={{ color: T.inkSoft, fontSize: 11.5 }}>{phone || "No number on file"}</div>
+                    <div style={{ color: T.inkSoft, fontSize: 11.5, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      {phone || "No number on file"}
+                      <InAppTag has={inApp.reach.has(p.id)} loading={inApp.loading || !!inApp.error} />
+                    </div>
                   </div>
                   <div className="gfc-send-actions">
                     <a
@@ -231,6 +272,19 @@ export function MessagesView({ enriched, ageGroups, selectedIds, setSelectedIds,
           </div>
         )}
       </div>
+
+      <SentInAppHistory nameById={nameById} refreshKey={historyKey} />
+
+      {showSendInApp && (
+        <SendInAppModal
+          players={selectedPlayers}
+          rawText={rawText}
+          templateId={templateId}
+          reach={inApp.reach}
+          onClose={() => setShowSendInApp(false)}
+          onSent={handleInAppSent}
+        />
+      )}
       </>
       )}
 

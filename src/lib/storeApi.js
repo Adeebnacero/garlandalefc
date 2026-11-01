@@ -148,6 +148,19 @@ export async function loadOrders() {
   return (data || []).map(fromDbOrder);
 }
 
+/**
+ * Active squad players with their guardian phone, used only to suggest who
+ * an older order is for when checkout didn't record the player. Raw rows;
+ * Store.jsx works out each player's current age group.
+ */
+export async function loadSquadForOrders() {
+  const { data, error } = await supabase
+    .from("players")
+    .select("id, name, dob, age_group_override, guardian_phone, active");
+  if (error) throw error;
+  return (data || []).filter((r) => r.active !== false);
+}
+
 async function rpc(name, args) {
   const { data, error } = await supabase.rpc(name, args);
   if (error) throw error;
