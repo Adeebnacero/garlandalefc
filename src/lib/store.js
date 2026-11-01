@@ -319,6 +319,13 @@ export function fromDbOrder(row) {
       isPreorder: !!l.is_preorder,
       status: l.status,
       stockShort: !!l.stock_short,
+      // Who the item is for, captured at checkout (see
+      // migrations/2026-11-store-order-players.sql). Name and age group are
+      // a snapshot from the moment of purchase, so they survive the player
+      // being deleted, a backup restore, or the 1 September age-group roll.
+      playerId: l.player_id || "",
+      playerName: l.player_name || "",
+      playerAgeGroup: l.player_age_group || "",
     }));
   const events = (row.store_order_events || [])
     .slice()
@@ -343,6 +350,58 @@ export function fromDbOrder(row) {
     events,
   };
 }
+
+/** Last 9 digits of a South African number, so 072…, +27 72… and 2772… all match. */
+export function phoneKey(phone) {
+  const d = String(phone || "").replace(/\D/g, "");
+  return d.length >= 9 ? d.slice(-9) : "";
+}
+
+/**
+ * Squad players keyed by guardian phone, for orders paid before checkout
+ * recorded the player. players: [{ id, name, ageGroup, guardianPhone }].
+ * A guardian_phone field holding two numbers ("072… / 083…") is indexed
+ * under both.
+ */
+export function playersByGuardianPhone(players) {
+  const map = new Map();
+  for (const p of players || []) {
+    for (const part of String(p.guardianPhone || "").split(/[,;/&]|\bor\b/i)) {
+      const k = phoneKey(part);
+      if (!k) continue;
+      if (!map.has(k)) map.set(k, []);
+      if (!map.get(k).some((x) => x.id === p.id)) map.get(k).push(p);
+    }
+  }
+  return map;
+}
+
+/**
+ * Who an order is for.
+ *   recorded: players chosen at checkout, one entry per player.
+ *   matched:  only when some lines have no player recorded (older orders):
+ *             squad players whose guardian phone matches the order's. This
+ *             is a hint, not a fact, so the screens label it as a match.
+ *   missing:  true when at least one line has no player recorded.
+ */
+export function orderPlayers(order, byPhone) {
+  const recorded = new Map();
+  for (const l of order.lines) {
+    if (!l.playerName) continue;
+    const key = l.playerId || l.playerName;
+    if (!recorded.has(key)) recorded.set(key, { id: l.playerId, name: l.playerName, ageGroup: l.playerAgeGroup });
+  }
+  const missing = order.lines.some((l) => !l.playerName);
+  const matched = missing && byPhone
+    ? (byPhone.get(phoneKey(order.guardianPhone)) || [])
+        .filter((p) => !recorded.has(p.id))
+        .map((p) => ({ id: p.id, name: p.name, ageGroup: p.ageGroup }))
+    : [];
+  return { recorded: [...recorded.values()], matched, missing };
+}
+
+/** "Zaid Ebrahim (U10)", or just the name when there's no age group. */
+export const playerLabel = (p) => (p.ageGroup ? `${p.name} (${p.ageGroup})` : p.name);
 
 /**
  * Status of a group of lines (all in-stock or all pre-order lines of one
@@ -435,7 +494,9 @@ export function filterOrders(orders, filter, today) {
     if (filter.period === "month" && monthKey(o.paidAt) !== today.slice(0, 7)) return false;
     if (filter.period === "3m" && String(o.paidAt || "").slice(0, 10) < since3m) return false;
     if (q) {
-      const hay = [o.number, o.guardianName, o.guardianEmail].join(" ").toLowerCase();
+      const who = o.who || orderPlayers(o);
+      const hay = [o.number, o.guardianName, o.guardianEmail, ...who.recorded.map((p) => p.name), ...who.matched.map((p) => p.name)]
+        .join(" ").toLowerCase();
       const phoneMatch = digits.length >= 3 && String(o.guardianPhone || "").replace(/\D/g, "").includes(digits);
       if (!hay.includes(q) && !phoneMatch) return false;
     }
@@ -450,17 +511,28 @@ const csvCell = (v) => {
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 
-/** One row per order line, ready to save as a .csv file. */
+/**
+ * One row per order line, ready to save as a .csv file. Orders may carry
+ * a precomputed `who` (from orderPlayers with the squad's phone index);
+ * without it, only players recorded at checkout are exported.
+ */
 export function ordersToCsv(orders) {
   const LABEL = { paid: "Paid", supplier: "Ordered from supplier", ready: "Ready for collection", collected: "Collected", refunded: "Refunded" };
   const rows = [[
-    "Order", "Paid on", "Guardian", "Phone", "Email", "Product", "Size", "Quantity", "Unit price", "Line total",
+    "Order", "Paid on", "Guardian", "Phone", "Email", "Player", "Age group", "Player source", "Product", "Size", "Quantity", "Unit price", "Line total",
     "Pre-order", "Line status", "Order items total", "Admin fee", "Order total", "Refunded", "Yoco payment",
   ]];
   for (const o of orders) {
+    const who = o.who || orderPlayers(o);
+    // A phone match is only exported when it's unambiguous (one player).
+    const guess = who.matched.length === 1 ? who.matched[0] : null;
     for (const l of o.lines) {
+      const player = l.playerName
+        ? [l.playerName, l.playerAgeGroup, "Checkout"]
+        : guess ? [guess.name, guess.ageGroup, "Matched by guardian phone"] : ["", "", "Not recorded"];
       rows.push([
         o.number, String(o.paidAt || "").slice(0, 10), o.guardianName, o.guardianPhone, o.guardianEmail,
+        ...player,
         l.name, l.size, l.quantity, l.unitPrice.toFixed(2), (l.unitPrice * l.quantity).toFixed(2),
         l.isPreorder ? "Yes" : "No", LABEL[l.status] || l.status,
         o.subtotal.toFixed(2), o.adminFee.toFixed(2), o.total.toFixed(2), o.refundedTotal.toFixed(2), o.yocoPaymentId,
