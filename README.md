@@ -253,11 +253,23 @@ in by hand on the day.
 
 ## A note on security
 
-There's no login screen by design — this is built for a single trusted user
-(the Chairman) rather than multiple staff accounts. That means anyone who
-has your app's URL *and* both env values could read/write the data — there's
-no per-user lock. Keep the `.env` values and (if deployed) the app URL
-private, the same way you'd treat a shared spreadsheet link. If down the
-line you want specific staff to log in with their own accounts and
-permissions, Supabase supports that (Auth + refined RLS policies) — just
-let me know and that can be layered on top of this without starting over.
+Staff sign in with their own accounts, and access is enforced by the
+database (Row Level Security), not by the app's menus. The public
+`anon` key in `.env` is safe to ship - it grants nothing on its own.
+
+Security fixes applied in November 2026 (see `migrations/2026-11-*.sql`
+and `SECURITY-CHANGES-2026-11.md`):
+
+- Only an Admin or Chairman can create, change or remove staff accounts,
+  and nobody can change their own role.
+- Restore is safe: it takes a `pre-restore` backup first, never deletes
+  parent links, read receipts or messages, and keeps money received online.
+- `send-email` is limited to Admin/Chairman/Treasurer, to addresses on file,
+  with sender details from Club Settings.
+- `invite-player`: coaches only for their own teams and the email on the
+  player's record; parents are told when a login is added.
+- Parents can only change contact details on their child's record.
+- `fetch-league-tables` only runs with the Vault secret sent by the weekly job.
+
+Deploy Edge Functions only from this repo's current versions, and never
+re-introduce the old `staff_all` policy or the old restore function.

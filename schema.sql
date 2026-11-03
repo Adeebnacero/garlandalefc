@@ -598,108 +598,12 @@ begin
 end;
 $$;
 
--- ---------- atomic restore (Phase 3 fix) ----------
--- Previously, restoring a backup ran as ~15 separate delete/insert calls
--- from the client, one table at a time. If any single call failed midway
--- (network blip, one bad row), the database was left in a partially
--- restored state with no way back - a real data-safety gap. Running this
--- as a single Postgres function fixes that: a PL/pgSQL function body is one
--- implicit transaction, so if anything inside fails, EVERYTHING in this
--- function rolls back automatically - either the whole restore succeeds or
--- none of it takes effect.
-create or replace function restore_from_snapshot(snapshot jsonb)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  caller_role text;
-begin
-  -- This function bypasses RLS (security definer), so the admin check has
-  -- to happen explicitly here rather than relying on table policies.
-  select role into caller_role from staff where user_id = auth.uid();
-  if caller_role is distinct from 'admin' then
-    raise exception 'Only an Admin can restore from a backup.';
-  end if;
-
-  -- Children first, then parents, respecting foreign keys.
-  delete from issued_items;
-  delete from match_squad;
-  delete from payments;
-  delete from player_status_log;
-  delete from matches;
-  delete from inventory_items;
-  delete from players;
-  delete from tiers;
-  delete from division_labels;
-  delete from club_assets;
-  delete from finance_entries;
-  delete from reminder_batches;
-  delete from audit_log;
-  delete from league_standings;
-  delete from league_table_sources;
-  delete from fixtures;
-  delete from notices;
-
-  -- Parents first, then children, on the way back in.
-  insert into tiers
-    select * from jsonb_populate_recordset(null::tiers, coalesce(snapshot->'tiers', '[]'::jsonb));
-  insert into players
-    select * from jsonb_populate_recordset(null::players, coalesce(snapshot->'players', '[]'::jsonb));
-  insert into inventory_items
-    select * from jsonb_populate_recordset(null::inventory_items, coalesce(snapshot->'inventory_items', '[]'::jsonb));
-  insert into matches
-    select * from jsonb_populate_recordset(null::matches, coalesce(snapshot->'matches', '[]'::jsonb));
-  insert into payments
-    select * from jsonb_populate_recordset(null::payments, coalesce(snapshot->'payments', '[]'::jsonb));
-  insert into match_squad
-    select * from jsonb_populate_recordset(null::match_squad, coalesce(snapshot->'match_squad', '[]'::jsonb));
-  insert into issued_items
-    select * from jsonb_populate_recordset(null::issued_items, coalesce(snapshot->'issued_items', '[]'::jsonb));
-  insert into player_status_log
-    select * from jsonb_populate_recordset(null::player_status_log, coalesce(snapshot->'player_status_log', '[]'::jsonb));
-  insert into division_labels
-    select * from jsonb_populate_recordset(null::division_labels, coalesce(snapshot->'division_labels', '[]'::jsonb));
-  insert into club_assets
-    select * from jsonb_populate_recordset(null::club_assets, coalesce(snapshot->'club_assets', '[]'::jsonb));
-  insert into reminder_batches
-    select * from jsonb_populate_recordset(null::reminder_batches, coalesce(snapshot->'reminder_batches', '[]'::jsonb));
-  insert into audit_log
-    select * from jsonb_populate_recordset(null::audit_log, coalesce(snapshot->'audit_log', '[]'::jsonb));
-  insert into league_table_sources
-    select * from jsonb_populate_recordset(null::league_table_sources, coalesce(snapshot->'league_table_sources', '[]'::jsonb));
-  insert into league_standings
-    select * from jsonb_populate_recordset(null::league_standings, coalesce(snapshot->'league_standings', '[]'::jsonb));
-  insert into finance_entries
-    select * from jsonb_populate_recordset(null::finance_entries, coalesce(snapshot->'finance_entries', '[]'::jsonb));
-  insert into fixtures
-    select * from jsonb_populate_recordset(null::fixtures, coalesce(snapshot->'fixtures', '[]'::jsonb));
-  insert into notices
-    select * from jsonb_populate_recordset(null::notices, coalesce(snapshot->'notices', '[]'::jsonb));
-  -- Restored notices never go to phones (again): mark them as handled for
-  -- the Player Portal's hourly push job. Checked by name so this still
-  -- works on a database that doesn't have push notifications set up.
-  if exists (select 1 from information_schema.columns
-             where table_schema = 'public' and table_name = 'notices' and column_name = 'push_sent_at') then
-    execute 'update notices set push_sent_at = now() where push_sent_at is null';
-  end if;
-
-  if snapshot ? 'club_settings' and jsonb_array_length(coalesce(snapshot->'club_settings', '[]'::jsonb)) > 0 then
-    insert into club_settings
-      select * from jsonb_populate_recordset(null::club_settings, snapshot->'club_settings')
-    on conflict (id) do update set
-      sender_email = excluded.sender_email,
-      sender_display_name = excluded.sender_display_name,
-      reply_to_email = excluded.reply_to_email,
-      bank_details = excluded.bank_details,
-      invoice_footer_note = excluded.invoice_footer_note,
-      updated_at = excluded.updated_at;
-  end if;
-end;
-$$;
-
-grant execute on function restore_from_snapshot(jsonb) to authenticated;
+-- ---------- restore from backup ----------
+-- restore_from_snapshot() lives in migrations/2026-11-safe-restore.sql.
+-- The old version that used to be here was REMOVED (2026-11): it deleted
+-- and re-inserted players and notices, which cascaded away every guardian
+-- link, notice read and private message, replaced the audit log, and
+-- failed whenever a fixture had a referee. Don't bring it back.
 
 -- Schedule the nightly snapshot for 21:00 UTC = 23:00 (11pm) Cape Town time
 -- (SAST is UTC+2 year-round, no daylight saving). Re-running this schema is
@@ -844,36 +748,11 @@ select cron.schedule(
 );
 
 -- ---------- weekly league table refresh ----------
--- Calls the fetch-league-tables Edge Function every Monday morning (07:00
--- UTC = 09:00 Cape Town time), after the weekend's matches have been
--- played and the federation's site has had time to update.
---
--- IMPORTANT: replace BOTH placeholders below before running this section -
--- they're specific to your own Supabase project and can't be filled in
--- generically here:
---   YOUR_PROJECT_REF      -> Project Settings -> API -> Project URL
---   YOUR_SERVICE_ROLE_KEY -> Project Settings -> API -> service_role secret
--- If you skip this step, the job will run on schedule but silently fail
--- to reach the function - check Settings -> League table sources for a
--- "Last fetched" error message if the table never updates.
-do $$
-begin
-  if exists (select 1 from cron.job where jobname = 'garlandale-weekly-league-tables') then
-    perform cron.unschedule('garlandale-weekly-league-tables');
-  end if;
-end $$;
+-- Scheduled in migrations/2026-11-league-tables-secret.sql, which sends a
+-- shared secret from Vault that fetch-league-tables checks. The old job
+-- that used to be here (with a YOUR_SERVICE_ROLE_KEY placeholder) was
+-- REMOVED (2026-11) - re-running it would replace the working job.
 
-select cron.schedule(
-  'garlandale-weekly-league-tables',
-  '0 7 * * 1',
-  $$
-  select net.http_post(
-    url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/fetch-league-tables',
-    headers := jsonb_build_object('Authorization', 'Bearer YOUR_SERVICE_ROLE_KEY', 'Content-Type', 'application/json'),
-    body := '{}'::jsonb
-  );
-  $$
-);
 
 -- ---------- Staff accounts & roles ----------
 -- Every logged-in user needs a row here to have any access at all. Roles:
@@ -1335,11 +1214,7 @@ create policy "backups_all" on backups for all
   using (has_permission('backups', 'select'))
   with check (has_permission('backups', 'select'));
 
--- staff: admin only
-drop policy if exists "staff_all" on staff;
-create policy "staff_all" on staff for all
-  using (has_permission('staff', 'select'))
-  with check (has_permission('staff', 'select'));
+-- staff: policies are defined further down (see "staff_read" / "staff_write").
 
 grant execute on function create_backup_snapshot(text) to authenticated;
 grant execute on function current_staff_role() to authenticated;
@@ -1386,10 +1261,25 @@ on conflict (role, table_name) do update set
 -- their own account after logging in, regardless of what role_permissions
 -- says, without weakening anything (a user could always identify their
 -- own role anyway).
+-- staff: anyone can read their own row; roles with staff 'select' can read
+-- the list; ONLY Admin/Chairman can create, change or remove staff.
+-- (Replaced 2026-11: the old single FOR ALL policy let Treasurer/Coach
+-- insert/update/delete staff rows, including promoting themselves to admin.
+-- See migrations/2026-11-staff-write-admin-only.sql.)
 drop policy if exists "staff_all" on staff;
-create policy "staff_all" on staff for all
-  using (has_permission('staff', 'select') or user_id = auth.uid())
-  with check (has_permission('staff', 'select'));
+drop policy if exists staff_read on staff;
+create policy staff_read on staff for select
+  using (has_permission('staff','select') or user_id = auth.uid());
+drop policy if exists staff_write on staff;
+create policy staff_write on staff for insert
+  with check (current_staff_role() in ('admin','chairman'));
+drop policy if exists staff_update on staff;
+create policy staff_update on staff for update
+  using (current_staff_role() in ('admin','chairman'))
+  with check (current_staff_role() in ('admin','chairman'));
+drop policy if exists staff_delete on staff;
+create policy staff_delete on staff for delete
+  using (current_staff_role() in ('admin','chairman'));
 
 -- Referees can only ever read fixtures - no insert/update/delete, no
 -- access to anything else in the app (finance, squad, messages, etc. all
@@ -1497,7 +1387,11 @@ create trigger fixtures_sync_referee_appointment
   after insert or update of referee_id on fixtures
   for each row execute function sync_referee_appointment();
 
--- ---------- fold referee data into backups (Admin only, same as before) ----------
+-- ---------- nightly backup snapshot (matches production, 2026-11) ----------
+-- Staff with Backups access (or the nightly job, which has no login) only.
+-- NOTE: this covers tables created outside this file (guardian_players,
+-- store_*, home_banners, supporters, supporter_settings); it needs those
+-- tables to exist.
 create or replace function create_backup_snapshot(p_kind text default 'scheduled')
 returns uuid
 language plpgsql
@@ -1507,7 +1401,11 @@ as $$
 declare
   new_id uuid;
 begin
-  insert into backups (kind, data)
+  if auth.uid() is not null and not has_permission('backups', 'select') then
+    raise exception 'Only staff with access to Backups can make a backup.' using errcode = '42501';
+  end if;
+
+  insert into backups (kind, snapshot)
   values (
     p_kind,
     jsonb_build_object(
@@ -1529,112 +1427,31 @@ begin
       'league_standings', (select coalesce(jsonb_agg(to_jsonb(ls)), '[]'::jsonb) from league_standings ls),
       'fixtures', (select coalesce(jsonb_agg(to_jsonb(fx)), '[]'::jsonb) from fixtures fx),
       'referee_appointments', (select coalesce(jsonb_agg(to_jsonb(ra)), '[]'::jsonb) from referee_appointments ra),
-      'notices', (select coalesce(jsonb_agg(to_jsonb(nt)), '[]'::jsonb) from notices nt)
+      'notices', (select coalesce(jsonb_agg(to_jsonb(nt)), '[]'::jsonb) from notices nt),
+      'guardian_players', (select coalesce(jsonb_agg(to_jsonb(gp)), '[]'::jsonb) from guardian_players gp),
+      'store_products', (select coalesce(jsonb_agg(to_jsonb(sp)), '[]'::jsonb) from store_products sp),
+      'store_product_sizes', (select coalesce(jsonb_agg(to_jsonb(sz)), '[]'::jsonb) from store_product_sizes sz),
+      'store_settings', (select coalesce(jsonb_agg(to_jsonb(ss)), '[]'::jsonb) from store_settings ss),
+      'store_orders', (select coalesce(jsonb_agg(to_jsonb(so)), '[]'::jsonb) from store_orders so),
+      'store_order_items', (select coalesce(jsonb_agg(to_jsonb(soi)), '[]'::jsonb) from store_order_items soi),
+      'store_order_events', (select coalesce(jsonb_agg(to_jsonb(soe)), '[]'::jsonb) from store_order_events soe),
+      'store_order_counters', (select coalesce(jsonb_agg(to_jsonb(soc)), '[]'::jsonb) from store_order_counters soc),
+      'home_banners', (select coalesce(jsonb_agg(to_jsonb(hb)), '[]'::jsonb) from home_banners hb),
+      'supporters', (select coalesce(jsonb_agg(to_jsonb(su)), '[]'::jsonb) from supporters su),
+      'supporter_settings', (select coalesce(jsonb_agg(to_jsonb(sse)), '[]'::jsonb) from supporter_settings sse)
     )
   )
   returning id into new_id;
 
-  -- prune anything older than 30 days so free-tier storage stays healthy
   delete from backups where created_at < now() - interval '30 days';
-
   return new_id;
 end;
 $$;
 
-create or replace function restore_from_snapshot(snapshot jsonb)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  caller_role text;
-begin
-  -- This function bypasses RLS (security definer), so the admin check has
-  -- to happen explicitly here rather than relying on table policies.
-  select role into caller_role from staff where user_id = auth.uid();
-  if caller_role is distinct from 'admin' then
-    raise exception 'Only an Admin can restore from a backup.';
-  end if;
-
-  -- Children first, then parents, respecting foreign keys. referee_appointments
-  -- references fixtures, so it has to go before fixtures on the way out.
-  delete from issued_items;
-  delete from match_squad;
-  delete from payments;
-  delete from player_status_log;
-  delete from matches;
-  delete from inventory_items;
-  delete from players;
-  delete from tiers;
-  delete from division_labels;
-  delete from club_assets;
-  delete from finance_entries;
-  delete from reminder_batches;
-  delete from audit_log;
-  delete from league_standings;
-  delete from league_table_sources;
-  delete from referee_appointments;
-  delete from fixtures;
-  delete from notices;
-
-  -- Parents first, then children, on the way back in.
-  insert into tiers
-    select * from jsonb_populate_recordset(null::tiers, coalesce(snapshot->'tiers', '[]'::jsonb));
-  insert into players
-    select * from jsonb_populate_recordset(null::players, coalesce(snapshot->'players', '[]'::jsonb));
-  insert into inventory_items
-    select * from jsonb_populate_recordset(null::inventory_items, coalesce(snapshot->'inventory_items', '[]'::jsonb));
-  insert into matches
-    select * from jsonb_populate_recordset(null::matches, coalesce(snapshot->'matches', '[]'::jsonb));
-  insert into payments
-    select * from jsonb_populate_recordset(null::payments, coalesce(snapshot->'payments', '[]'::jsonb));
-  insert into match_squad
-    select * from jsonb_populate_recordset(null::match_squad, coalesce(snapshot->'match_squad', '[]'::jsonb));
-  insert into issued_items
-    select * from jsonb_populate_recordset(null::issued_items, coalesce(snapshot->'issued_items', '[]'::jsonb));
-  insert into player_status_log
-    select * from jsonb_populate_recordset(null::player_status_log, coalesce(snapshot->'player_status_log', '[]'::jsonb));
-  insert into division_labels
-    select * from jsonb_populate_recordset(null::division_labels, coalesce(snapshot->'division_labels', '[]'::jsonb));
-  insert into club_assets
-    select * from jsonb_populate_recordset(null::club_assets, coalesce(snapshot->'club_assets', '[]'::jsonb));
-  insert into reminder_batches
-    select * from jsonb_populate_recordset(null::reminder_batches, coalesce(snapshot->'reminder_batches', '[]'::jsonb));
-  insert into audit_log
-    select * from jsonb_populate_recordset(null::audit_log, coalesce(snapshot->'audit_log', '[]'::jsonb));
-  insert into league_table_sources
-    select * from jsonb_populate_recordset(null::league_table_sources, coalesce(snapshot->'league_table_sources', '[]'::jsonb));
-  insert into league_standings
-    select * from jsonb_populate_recordset(null::league_standings, coalesce(snapshot->'league_standings', '[]'::jsonb));
-  insert into finance_entries
-    select * from jsonb_populate_recordset(null::finance_entries, coalesce(snapshot->'finance_entries', '[]'::jsonb));
-  insert into fixtures
-    select * from jsonb_populate_recordset(null::fixtures, coalesce(snapshot->'fixtures', '[]'::jsonb));
-  insert into referee_appointments
-    select * from jsonb_populate_recordset(null::referee_appointments, coalesce(snapshot->'referee_appointments', '[]'::jsonb));
-  insert into notices
-    select * from jsonb_populate_recordset(null::notices, coalesce(snapshot->'notices', '[]'::jsonb));
-  -- Restored notices never go to phones (again): mark them as handled for
-  -- the Player Portal's hourly push job. Checked by name so this still
-  -- works on a database that doesn't have push notifications set up.
-  if exists (select 1 from information_schema.columns
-             where table_schema = 'public' and table_name = 'notices' and column_name = 'push_sent_at') then
-    execute 'update notices set push_sent_at = now() where push_sent_at is null';
-  end if;
-
-  if snapshot ? 'club_settings' and jsonb_array_length(coalesce(snapshot->'club_settings', '[]'::jsonb)) > 0 then
-    insert into club_settings
-      select * from jsonb_populate_recordset(null::club_settings, snapshot->'club_settings')
-    on conflict (id) do update set
-      sender_email = excluded.sender_email,
-      sender_display_name = excluded.sender_display_name,
-      reply_to_email = excluded.reply_to_email,
-      bank_details = excluded.bank_details,
-      invoice_footer_note = excluded.invoice_footer_note,
-      default_referee_fee = excluded.default_referee_fee,
-      updated_at = excluded.updated_at;
-  end if;
-end;
-$$;
+-- ---------- restore from backup ----------
+-- restore_from_snapshot() lives in migrations/2026-11-safe-restore.sql.
+-- The old version that used to be here was REMOVED (2026-11): it deleted
+-- and re-inserted players and notices, which cascaded away every guardian
+-- link, notice read and private message, replaced the audit log, and
+-- failed whenever a fixture had a referee. Don't bring it back.
 
