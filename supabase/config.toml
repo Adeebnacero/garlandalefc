@@ -1,0 +1,13 @@
+# Supabase CLI settings for this repo's Edge Functions.
+#
+# Every function checks the caller's Supabase login (JWT) by default. One
+# exception: fetch-league-tables is called by the weekly pg_cron job, which
+# can't send a login - it proves who it is with a shared secret from Vault
+# instead (checked in fetch-league-tables/index.ts). Keeping this here means
+# a plain `supabase functions deploy fetch-league-tables` can't switch login
+# checking back on and silently break the weekly job.
+
+project_id = "hfpmlrrunlttiekfdjdz"
+
+[functions.fetch-league-tables]
+verify_jwt = false
